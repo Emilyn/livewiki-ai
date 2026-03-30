@@ -1,0 +1,12 @@
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Backend build artefacts
+backend/mdf-viewer-server
+backend/uploads/
+
+# OS / editor
+.DS_Store
+*.swp
+.env

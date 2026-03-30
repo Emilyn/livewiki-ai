@@ -1,0 +1,269 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import mermaid from 'mermaid'
+import { getFileContent, saveFileContent, getDriveFileContent, saveDriveFileContent } from '../api'
+
+mermaid.initialize({ startOnLoad: false, theme: 'dark', darkMode: true })
+
+function MermaidBlock({ code }) {
+  const [svg, setSvg] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const id = 'mermaid-' + Math.random().toString(36).slice(2)
+    mermaid.render(id, code)
+      .then(({ svg }) => setSvg(svg))
+      .catch(e => setError(e.message || 'Diagram error'))
+  }, [code])
+
+  if (error) return (
+    <pre style={{ color: 'var(--danger)', background: 'var(--surface2)', padding: '0.75rem', borderRadius: 6, fontSize: '0.8125rem' }}>
+      Mermaid error: {error}
+    </pre>
+  )
+  return (
+    <div style={{ overflowX: 'auto', margin: '1rem 0', textAlign: 'center' }}
+      dangerouslySetInnerHTML={{ __html: svg }} />
+  )
+}
+
+function CodeBlock({ className, children }) {
+  const lang = (className || '').replace('language-', '')
+  const code = String(children).trimEnd()
+  if (lang === 'mermaid') return <MermaidBlock code={code} />
+  return <pre><code className={className}>{code}</code></pre>
+}
+
+function Preview({ content }) {
+  return (
+    <div className="md-body">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
+        {content}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
+const TOOLBAR = [
+  { label: 'B',   style: { fontWeight: 700 },      wrap: ['**', '**'],   title: 'Bold' },
+  { label: 'I',   style: { fontStyle: 'italic' },   wrap: ['_', '_'],     title: 'Italic' },
+  { label: '`',   style: { fontFamily: 'monospace'},wrap: ['`', '`'],     title: 'Inline code' },
+  { label: 'H1',  style: {},                        prefix: '# ',         title: 'Heading 1' },
+  { label: 'H2',  style: {},                        prefix: '## ',        title: 'Heading 2' },
+  { label: 'H3',  style: {},                        prefix: '### ',       title: 'Heading 3' },
+  { label: '—',   style: {},                        insert: '\n---\n',    title: 'Horizontal rule' },
+  { label: '≡',   style: {},                        prefix: '- ',         title: 'List item' },
+  { label: '☐',   style: {},                        prefix: '- [ ] ',     title: 'Task item' },
+  { label: '❝',   style: {},                        prefix: '> ',         title: 'Blockquote' },
+  { label: '⌥',   style: { fontFamily: 'monospace'},block: '```\n',       title: 'Code block' },
+]
+
+export default function MarkdownViewer({ file, onToast }) {
+  const [content, setContent] = useState(null)
+  const [draft, setDraft]     = useState(null)
+  const [mode, setMode]       = useState('view') // 'view' | 'edit' | 'split'
+  const [saving, setSaving]   = useState(false)
+  const [loading, setLoading] = useState(false)
+  const textareaRef = useRef()
+
+  useEffect(() => {
+    if (!file) return
+    setLoading(true)
+    setContent(null)
+    setDraft(null)
+    setMode('view')
+    const fetchContent = file.source === 'drive' ? getDriveFileContent : getFileContent
+    fetchContent(file.id)
+      .then(text => { setContent(text); setDraft(text) })
+      .catch(() => onToast('Failed to load file content', 'error'))
+      .finally(() => setLoading(false))
+  }, [file])
+
+  const isDirty = draft !== content
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const saveFn = file.source === 'drive' ? saveDriveFileContent : saveFileContent
+      await saveFn(file.id, draft)
+      setContent(draft)
+      onToast('Saved')
+    } catch {
+      onToast('Save failed', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDiscard = () => setDraft(content)
+
+  // Toolbar action: insert wrap/prefix/block around selection
+  const applyFormat = useCallback((action) => {
+    const ta = textareaRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const end   = ta.selectionEnd
+    const sel   = draft.slice(start, end)
+    let next = draft, cursor = start
+
+    if (action.wrap) {
+      const [open, close] = action.wrap
+      next = draft.slice(0, start) + open + sel + close + draft.slice(end)
+      cursor = sel ? end + open.length + close.length : start + open.length
+    } else if (action.prefix) {
+      // Apply to each selected line
+      const before = draft.slice(0, start)
+      const after  = draft.slice(end)
+      const lines  = sel || ''
+      const prefixed = lines.split('\n').map(l => action.prefix + l).join('\n')
+      const insert = sel ? prefixed : action.prefix
+      next = before + insert + after
+      cursor = start + insert.length
+    } else if (action.insert) {
+      next = draft.slice(0, start) + action.insert + draft.slice(end)
+      cursor = start + action.insert.length
+    } else if (action.block) {
+      const block = action.block + sel + '\n```'
+      next = draft.slice(0, start) + block + draft.slice(end)
+      cursor = start + action.block.length + sel.length
+    }
+
+    setDraft(next)
+    // Restore focus + cursor after React re-render
+    requestAnimationFrame(() => {
+      ta.focus()
+      ta.setSelectionRange(cursor, cursor)
+    })
+  }, [draft])
+
+  // Keyboard shortcuts in textarea
+  const handleKeyDown = (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+      e.preventDefault()
+      handleSave()
+    }
+    // Tab → insert 2 spaces
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      const ta = e.target
+      const s = ta.selectionStart
+      const next = draft.slice(0, s) + '  ' + draft.slice(ta.selectionEnd)
+      setDraft(next)
+      requestAnimationFrame(() => { ta.setSelectionRange(s + 2, s + 2) })
+    }
+  }
+
+  if (loading) return (
+    <div className="card">
+      <div className="loading-overlay"><span className="spinner" /> Loading...</div>
+    </div>
+  )
+
+  if (content === null) return null
+
+  const inEdit = mode === 'edit' || mode === 'split'
+
+  return (
+    <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div className="card-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+          <h2 style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</h2>
+          {isDirty && <span style={{ fontSize: '0.7rem', color: 'var(--muted)', flexShrink: 0 }}>● unsaved</span>}
+        </div>
+        <div style={{ display: 'flex', gap: '0.375rem', alignItems: 'center', flexShrink: 0 }}>
+          {/* Mode toggle */}
+          {['view','split','edit'].map(m => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              style={{
+                padding: '0.3rem 0.65rem',
+                fontSize: '0.75rem',
+                background: mode === m ? 'var(--accent)' : 'var(--surface2)',
+                color: mode === m ? 'white' : 'var(--muted)',
+                border: '1px solid ' + (mode === m ? 'var(--accent)' : 'var(--border)'),
+              }}
+            >
+              {m === 'view' ? 'Preview' : m === 'split' ? 'Split' : 'Edit'}
+            </button>
+          ))}
+          {isDirty && (
+            <>
+              <button onClick={handleDiscard} style={{ background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', padding: '0.3rem 0.65rem', fontSize: '0.75rem' }}>
+                Discard
+              </button>
+              <button onClick={handleSave} disabled={saving} className="btn-primary" style={{ padding: '0.3rem 0.75rem', fontSize: '0.75rem' }}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Toolbar (edit / split) */}
+      {inEdit && (
+        <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', padding: '0.5rem 1rem', borderBottom: '1px solid var(--border)', background: 'var(--surface2)' }}>
+          {TOOLBAR.map((t, i) => (
+            <button
+              key={i}
+              title={t.title}
+              onClick={() => applyFormat(t)}
+              style={{
+                ...t.style,
+                padding: '0.2rem 0.55rem',
+                fontSize: '0.8125rem',
+                background: 'var(--surface)',
+                color: 'var(--text)',
+                border: '1px solid var(--border)',
+                minWidth: 30,
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+          <span style={{ marginLeft: 'auto', fontSize: '0.7rem', color: 'var(--muted)', alignSelf: 'center' }}>
+            {navigator.platform.includes('Mac') ? '⌘S' : 'Ctrl+S'} to save
+          </span>
+        </div>
+      )}
+
+      {/* Body */}
+      <div style={{ display: 'grid', gridTemplateColumns: mode === 'split' ? '1fr 1fr' : '1fr', flex: 1, minHeight: 0 }}>
+        {/* Editor pane */}
+        {inEdit && (
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            spellCheck={false}
+            style={{
+              flex: 1,
+              resize: 'none',
+              background: 'var(--bg)',
+              color: 'var(--text)',
+              border: 'none',
+              borderRight: mode === 'split' ? '1px solid var(--border)' : 'none',
+              outline: 'none',
+              padding: '1.25rem',
+              fontFamily: "'Fira Code', 'Cascadia Code', monospace",
+              fontSize: '0.875rem',
+              lineHeight: 1.7,
+              minHeight: 500,
+              tabSize: 2,
+            }}
+          />
+        )}
+
+        {/* Preview pane */}
+        {(mode === 'view' || mode === 'split') && (
+          <div style={{ padding: '1.25rem', overflowY: 'auto', minHeight: mode === 'split' ? 500 : undefined }}>
+            <Preview content={draft ?? content} />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
