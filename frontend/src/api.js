@@ -66,3 +66,28 @@ export const getDriveChannelData  = (id, group, name) =>
 export const startDriveAuth = () => {
   window.location.href = `/api/drive/auth?origin=${encodeURIComponent(window.location.origin)}`
 }
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+export const getSettings = () => api.get('/settings').then(r => r.data)
+export const putSettings = (data) => api.put('/settings', data).then(r => r.data)
+
+// ── GitHub ────────────────────────────────────────────────────────────────────
+export const startGitHubAuth  = () => {
+  window.location.href = `/api/github/auth?origin=${encodeURIComponent(window.location.origin)}`
+}
+export const saveGitHubToken  = (token) => api.put('/github/token', { access_token: token })
+export const getGitHubStatus  = () => api.get('/github/status').then(r => r.data)
+export const disconnectGitHub = (login) => api.delete('/github/disconnect', { params: login ? { login } : {} })
+export const listGitHubRepos  = () => api.get('/github/repos').then(r => r.data)
+export const getGitHubTree    = (repo, branch) =>
+  api.get('/github/tree', { params: { repo, branch } }).then(r => r.data)
+export const getGitHubContent = (repo, path, branch) =>
+  api.get('/github/content', { params: { repo, path, branch } }).then(r => r.data)
+export const generateWiki     = (body) => api.post('/wiki/generate', body).then(r => r.data)
+
+// ── Folders ───────────────────────────────────────────────────────────────────
+export const listFolders      = () => api.get('/files/folders').then(r => r.data)
+export const createFolder     = (name) => api.post('/files/folders', { name }).then(r => r.data)
+export const deleteFolder     = (id) => api.delete(`/files/folders/${id}`)
+export const assignFileFolder = (fileId, folderId) =>
+  api.put(`/files/${fileId}/folder`, { folder_id: folderId }).then(r => r.data)

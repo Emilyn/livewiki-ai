@@ -443,6 +443,46 @@ input:focus, select:focus { border-color: var(--accent); }
   to   { transform: translateX(0);    opacity: 1; }
 }
 
+/* Folder management */
+.folder-section { display: flex; flex-direction: column; }
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: background 0.1s;
+  user-select: none;
+}
+.folder-row:hover { background: var(--surface2); }
+.folder-chevron {
+  font-size: 0.625rem;
+  color: var(--muted);
+  transition: transform 0.15s;
+  width: 10px;
+  display: inline-block;
+}
+.folder-chevron.collapsed { transform: rotate(-90deg); }
+.folder-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-files {
+  padding-left: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+.folder-select {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.35rem;
+  height: 24px;
+  max-width: 100px;
+  border-radius: 4px;
+}
+.folder-name-input { font-size: 0.875rem; }
+
 /* Recharts overrides */
 .recharts-default-tooltip {
   background: var(--surface2) !important;
