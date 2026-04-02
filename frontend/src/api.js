@@ -85,6 +85,13 @@ export const getGitHubContent = (repo, path, branch) =>
   api.get('/github/content', { params: { repo, path, branch } }).then(r => r.data)
 export const generateWiki     = (body) => api.post('/wiki/generate', body).then(r => r.data)
 
+// ── Wiki v2 ───────────────────────────────────────────────────────────────────
+export const listWikis      = () => api.get('/wiki').then(r => r.data)
+export const getWiki        = (slug) => api.get(`/wiki/${slug}`).then(r => r.data)
+export const getWikiPage    = (slug, pageId) => api.get(`/wiki/${slug}/page/${pageId}`).then(r => r.data)
+export const generateWikiV2 = (repo, branch) => api.post('/wiki/generate', { repo, branch }).then(r => r.data)
+export const deleteWikiV2   = (slug) => api.delete(`/wiki/${slug}`)
+
 // ── Folders ───────────────────────────────────────────────────────────────────
 export const listFolders      = () => api.get('/files/folders').then(r => r.data)
 export const createFolder     = (name) => api.post('/files/folders', { name }).then(r => r.data)
