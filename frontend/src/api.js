@@ -91,6 +91,8 @@ export const getWiki        = (slug) => api.get(`/wiki/${slug}`).then(r => r.dat
 export const getWikiPage    = (slug, pageId) => api.get(`/wiki/${slug}/page/${pageId}`).then(r => r.data)
 export const generateWikiV2 = (repo, branch) => api.post('/wiki/generate', { repo, branch }).then(r => r.data)
 export const deleteWikiV2   = (slug) => api.delete(`/wiki/${slug}`)
+export const wikiChat       = (slug, question, history) =>
+  api.post(`/wiki/${slug}/chat`, { question, history }).then(r => r.data)
 
 // ── Folders ───────────────────────────────────────────────────────────────────
 export const listFolders      = () => api.get('/files/folders').then(r => r.data)

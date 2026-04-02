@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import mermaid from 'mermaid'
 import {
   getGitHubStatus,
   listGitHubRepos,
-  listWikis, getWiki, getWikiPage, generateWikiV2, deleteWikiV2,
+  listWikis, getWikiPage, generateWikiV2, deleteWikiV2, wikiChat,
 } from '../api'
 
 mermaid.initialize({ startOnLoad: false, theme: 'dark', darkMode: true })
@@ -29,6 +29,151 @@ function IconTrash({ size = 14 }) {
 }
 function IconRefresh({ size = 14 }) {
   return <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+}
+function IconChat({ size = 14 }) {
+  return <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+}
+function IconSend({ size = 14 }) {
+  return <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+}
+
+// ── Chat panel ────────────────────────────────────────────────────────────────
+function ChatPanel({ wikiSlug, onClose }) {
+  const [messages, setMessages] = useState([])  // [{role, content}]
+  const [input, setInput]       = useState('')
+  const [loading, setLoading]   = useState(false)
+  const bottomRef               = useRef(null)
+  const inputRef                = useRef(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, loading])
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  const handleSend = async () => {
+    const q = input.trim()
+    if (!q || loading) return
+    const newMessages = [...messages, { role: 'user', content: q }]
+    setMessages(newMessages)
+    setInput('')
+    setLoading(true)
+    try {
+      // Pass history excluding the last user message (backend will append it)
+      const history = newMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
+      const { answer } = await wikiChat(wikiSlug, q, history)
+      setMessages(m => [...m, { role: 'assistant', content: answer }])
+    } catch (e) {
+      setMessages(m => [...m, { role: 'assistant', content: `Error: ${e?.response?.data?.error || 'Something went wrong'}` }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      {/* Chat header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <IconChat size={15} />
+        <span style={{ fontWeight: 600, fontSize: '0.9375rem', flex: 1 }}>Ask AI</span>
+        <button className="btn-icon" onClick={onClose} title="Close chat" style={{ opacity: 0.6 }}>✕</button>
+      </div>
+
+      {/* Messages */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', minHeight: 0 }}>
+        {messages.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--muted)', fontSize: '0.875rem' }}>
+            <div style={{ marginBottom: '0.75rem', fontSize: '1.5rem' }}>💬</div>
+            <div style={{ fontWeight: 500, marginBottom: '0.375rem' }}>Ask anything about this repo</div>
+            <div style={{ fontSize: '0.8125rem' }}>How does auth work? What does X module do?</div>
+          </div>
+        )}
+        {messages.map((msg, i) => (
+          <div key={i} style={{ display: 'flex', gap: '0.625rem', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row', alignItems: 'flex-start' }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+              background: msg.role === 'user' ? 'var(--accent)' : 'var(--surface2)',
+              border: '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '0.7rem', fontWeight: 700, color: msg.role === 'user' ? 'white' : 'var(--muted)',
+            }}>
+              {msg.role === 'user' ? 'U' : 'AI'}
+            </div>
+            <div style={{
+              maxWidth: '82%', padding: '0.625rem 0.875rem', borderRadius: 10,
+              background: msg.role === 'user' ? 'rgba(99,102,241,0.12)' : 'var(--surface2)',
+              border: `1px solid ${msg.role === 'user' ? 'rgba(99,102,241,0.25)' : 'var(--border)'}`,
+              fontSize: '0.875rem', lineHeight: 1.6,
+            }}>
+              {msg.role === 'assistant' ? (
+                <div className="md-body" style={{ fontSize: '0.875rem' }}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                </div>
+              ) : (
+                <span>{msg.content}</span>
+              )}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start' }}>
+            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--surface2)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, color: 'var(--muted)', flexShrink: 0 }}>AI</div>
+            <div style={{ padding: '0.75rem 1rem', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+              {[0,1,2].map(i => (
+                <div key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--muted)', animation: `bounce 1.2s ${i * 0.2}s infinite` }} />
+              ))}
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: '0.875rem 1.25rem', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask a question… (Enter to send)"
+            rows={2}
+            disabled={loading}
+            style={{
+              flex: 1, resize: 'none', background: 'var(--surface2)', border: '1px solid var(--border)',
+              borderRadius: 8, color: 'var(--text)', padding: '0.5rem 0.75rem',
+              fontFamily: 'inherit', fontSize: '0.875rem', outline: 'none', lineHeight: 1.5,
+              transition: 'border-color 0.15s',
+            }}
+            onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+            onBlur={e => e.target.style.borderColor = 'var(--border)'}
+          />
+          <button
+            className="btn-primary"
+            onClick={handleSend}
+            disabled={!input.trim() || loading}
+            style={{ padding: '0 0.875rem', display: 'flex', alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch', borderRadius: 8 }}
+          >
+            <IconSend size={15} />
+          </button>
+        </div>
+        <p style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '0.375rem' }}>Shift+Enter for new line</p>
+      </div>
+
+      <style>{`
+        @keyframes bounce {
+          0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+          40% { transform: translateY(-6px); opacity: 1; }
+        }
+      `}</style>
+    </div>
+  )
 }
 
 // ── Mermaid block ─────────────────────────────────────────────────────────────
@@ -144,6 +289,9 @@ export default function WikiPage({ onToast }) {
   // UI state
   const [view, setView]             = useState('list') // 'list' | 'new' | 'wiki'
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [showChat, setShowChat]     = useState(false)
+  const [expandedRepo, setExpandedRepo] = useState(null)  // repo id for branch picker
+  const [branchInput, setBranchInput]   = useState('')
 
   useEffect(() => {
     getGitHubStatus()
@@ -174,7 +322,14 @@ export default function WikiPage({ onToast }) {
       setActiveWiki(meta)
       setActivePage(meta.pages[0] || null)
       setView('wiki')
-      onToast(`Wiki generated for ${repo.full_name}`)
+      const regen = meta.regenerated_pages
+      if (Array.isArray(regen) && regen.length === 0) {
+        onToast('Already up to date — no changes detected')
+      } else if (Array.isArray(regen) && regen.length < meta.pages.length) {
+        onToast(`Updated ${regen.length} page${regen.length !== 1 ? 's' : ''}: ${regen.join(', ')}`)
+      } else {
+        onToast(`Wiki generated for ${repo.full_name}`)
+      }
     } catch (e) {
       onToast(e?.response?.data?.error || 'Generation failed', 'error')
       setView('list')
@@ -253,6 +408,13 @@ export default function WikiPage({ onToast }) {
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
             <button
+              className={showChat ? 'btn-primary' : 'btn-secondary'}
+              style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}
+              onClick={() => setShowChat(v => !v)}
+            >
+              <IconChat size={12} /> {showChat ? 'Close Chat' : 'Ask AI'}
+            </button>
+            <button
               className="btn-secondary"
               style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}
               onClick={() => {
@@ -274,30 +436,47 @@ export default function WikiPage({ onToast }) {
         </div>
 
         {/* Wiki layout */}
-        <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: '1rem', alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: showChat ? '200px 1fr 380px' : '200px 1fr', gap: '1rem', alignItems: 'start' }}>
           {/* Page sidebar */}
           <div className="card">
             <div className="card-body" style={{ padding: '0.5rem' }}>
               {activeWiki.pages.map(page => (
                 <button
                   key={page.id}
-                  onClick={() => setActivePage(page)}
+                  onClick={() => { setActivePage(page); setShowChat(false) }}
                   style={{
                     width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem',
                     padding: '0.5rem 0.625rem', borderRadius: 6, fontSize: '0.8125rem',
-                    background: activePage?.id === page.id ? 'rgba(99,102,241,0.1)' : 'transparent',
-                    color: activePage?.id === page.id ? 'var(--accent)' : 'var(--text)',
-                    border: `1px solid ${activePage?.id === page.id ? 'rgba(99,102,241,0.25)' : 'transparent'}`,
-                    cursor: 'pointer', textAlign: 'left', fontWeight: activePage?.id === page.id ? 600 : 400,
+                    background: activePage?.id === page.id && !showChat ? 'rgba(99,102,241,0.1)' : 'transparent',
+                    color: activePage?.id === page.id && !showChat ? 'var(--accent)' : 'var(--text)',
+                    border: `1px solid ${activePage?.id === page.id && !showChat ? 'rgba(99,102,241,0.25)' : 'transparent'}`,
+                    cursor: 'pointer', textAlign: 'left', fontWeight: activePage?.id === page.id && !showChat ? 600 : 400,
                     transition: 'all 0.12s',
                   }}
-                  onMouseEnter={e => { if (activePage?.id !== page.id) e.currentTarget.style.background = 'var(--surface2)' }}
-                  onMouseLeave={e => { if (activePage?.id !== page.id) e.currentTarget.style.background = 'transparent' }}
+                  onMouseEnter={e => { if (!(activePage?.id === page.id && !showChat)) e.currentTarget.style.background = 'var(--surface2)' }}
+                  onMouseLeave={e => { if (!(activePage?.id === page.id && !showChat)) e.currentTarget.style.background = 'transparent' }}
                 >
                   <IconBook size={13} />
                   {page.title}
                 </button>
               ))}
+              <div style={{ borderTop: '1px solid var(--border)', marginTop: '0.375rem', paddingTop: '0.375rem' }}>
+                <button
+                  onClick={() => setShowChat(v => !v)}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    padding: '0.5rem 0.625rem', borderRadius: 6, fontSize: '0.8125rem',
+                    background: showChat ? 'rgba(99,102,241,0.1)' : 'transparent',
+                    color: showChat ? 'var(--accent)' : 'var(--muted)',
+                    border: `1px solid ${showChat ? 'rgba(99,102,241,0.25)' : 'transparent'}`,
+                    cursor: 'pointer', textAlign: 'left', fontWeight: showChat ? 600 : 400,
+                    transition: 'all 0.12s',
+                  }}
+                >
+                  <IconChat size={13} />
+                  Ask AI
+                </button>
+              </div>
             </div>
           </div>
 
@@ -305,6 +484,13 @@ export default function WikiPage({ onToast }) {
           <div className="card" style={{ minHeight: 500 }}>
             <WikiPageViewer wikiSlug={activeWiki.repo_slug} page={activePage} />
           </div>
+
+          {/* Chat panel */}
+          {showChat && (
+            <div className="card" style={{ minHeight: 500, display: 'flex', flexDirection: 'column', position: 'sticky', top: '1rem', maxHeight: 'calc(100vh - 8rem)', overflow: 'hidden' }}>
+              <ChatPanel wikiSlug={activeWiki.repo_slug} onClose={() => setShowChat(false)} />
+            </div>
+          )}
         </div>
 
         {/* Delete confirm modal */}
@@ -348,24 +534,51 @@ export default function WikiPage({ onToast }) {
             />
             <div style={{ maxHeight: 420, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
               {filtered.length === 0 && <div className="empty-state">No repositories found.</div>}
-              {filtered.map(r => (
-                <div
-                  key={r.id}
-                  className="file-item"
-                  onClick={() => handleGenerate(r)}
-                >
-                  <div className="file-icon"><GitHubIcon size={16} /></div>
-                  <div className="file-info">
-                    <div className="file-name">{r.full_name}</div>
-                    {r.description && <div className="file-meta">{r.description}</div>}
+              {filtered.map(r => {
+                const isExpanded = expandedRepo === r.id
+                return (
+                  <div key={r.id} style={{ borderRadius: 8, border: `1px solid ${isExpanded ? 'rgba(99,102,241,0.3)' : 'transparent'}`, transition: 'border-color 0.12s' }}>
+                    <div
+                      className="file-item"
+                      style={{ borderRadius: isExpanded ? '8px 8px 0 0' : 8 }}
+                      onClick={() => {
+                        if (isExpanded) { setExpandedRepo(null) } else { setExpandedRepo(r.id); setBranchInput(r.default_branch || 'main') }
+                      }}
+                    >
+                      <div className="file-icon"><GitHubIcon size={16} /></div>
+                      <div className="file-info">
+                        <div className="file-name">{r.full_name}</div>
+                        {r.description && <div className="file-meta">{r.description}</div>}
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.375rem', flexShrink: 0, alignItems: 'center' }}>
+                        {r.private && <span style={{ fontSize: '0.6875rem', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem', color: 'var(--muted)' }}>private</span>}
+                        <span style={{ fontSize: '0.6875rem', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 4, padding: '0.1rem 0.4rem', color: 'var(--accent)' }}>@{r.account}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 500 }}>{isExpanded ? '▲' : 'Select →'}</span>
+                      </div>
+                    </div>
+                    {isExpanded && (
+                      <div style={{ padding: '0.75rem 1rem', background: 'var(--surface2)', borderTop: '1px solid var(--border)', borderRadius: '0 0 8px 8px', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                        <label style={{ fontSize: '0.8125rem', color: 'var(--muted)', flexShrink: 0 }}>Branch:</label>
+                        <input
+                          value={branchInput}
+                          onChange={e => setBranchInput(e.target.value)}
+                          onClick={e => e.stopPropagation()}
+                          onKeyDown={e => { if (e.key === 'Enter') handleGenerate(r, branchInput) }}
+                          style={{ flex: 1, fontSize: '0.8125rem', padding: '0.35rem 0.6rem' }}
+                          autoFocus
+                        />
+                        <button
+                          className="btn-primary"
+                          style={{ fontSize: '0.8125rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.375rem', flexShrink: 0 }}
+                          onClick={e => { e.stopPropagation(); handleGenerate(r, branchInput) }}
+                        >
+                          <IconSparkle size={12} /> Generate
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <div style={{ display: 'flex', gap: '0.375rem', flexShrink: 0, alignItems: 'center' }}>
-                    {r.private && <span style={{ fontSize: '0.6875rem', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem', color: 'var(--muted)' }}>private</span>}
-                    <span style={{ fontSize: '0.6875rem', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 4, padding: '0.1rem 0.4rem', color: 'var(--accent)' }}>@{r.account}</span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 500 }}>Generate →</span>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         </div>

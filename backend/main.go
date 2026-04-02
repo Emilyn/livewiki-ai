@@ -161,15 +161,16 @@ type WikiPageMeta struct {
 }
 
 type WikiMeta struct {
-	ID          string         `json:"id"`
-	Repo        string         `json:"repo"`
-	RepoSlug    string         `json:"repo_slug"` // owner-repo (safe for filenames)
-	Branch      string         `json:"branch"`
-	CommitSHA   string         `json:"commit_sha"`
-	GeneratedAt time.Time      `json:"generated_at"`
-	Pages       []WikiPageMeta `json:"pages"`
-	Stack       []string       `json:"stack"`
-	Description string         `json:"description"`
+	ID               string         `json:"id"`
+	Repo             string         `json:"repo"`
+	RepoSlug         string         `json:"repo_slug"` // owner-repo (safe for filenames)
+	Branch           string         `json:"branch"`
+	CommitSHA        string         `json:"commit_sha"`
+	GeneratedAt      time.Time      `json:"generated_at"`
+	Pages            []WikiPageMeta `json:"pages"`
+	Stack            []string       `json:"stack"`
+	Description      string         `json:"description"`
+	RegeneratedPages []string       `json:"regenerated_pages,omitempty"`
 }
 
 type wikiCtx struct {
@@ -1428,6 +1429,52 @@ func githubGetContent(c *gin.Context) {
 	c.Data(http.StatusOK, "text/plain; charset=utf-8", decoded)
 }
 
+// callAIWithHistory calls the configured AI provider with a full message history.
+func callAIWithHistory(settings UserSettings, systemPrompt string, messages []map[string]string) (string, error) {
+	if settings.AIProvider == "openai" {
+		msgs := []map[string]string{{"role": "system", "content": systemPrompt}}
+		msgs = append(msgs, messages...)
+		reqBody, _ := json.Marshal(map[string]interface{}{
+			"model": settings.OpenAIModel, "max_tokens": 4096, "messages": msgs,
+		})
+		req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", strings.NewReader(string(reqBody)))
+		if err != nil { return "", err }
+		req.Header.Set("Authorization", "Bearer "+settings.OpenAIAPIKey)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil { return "", fmt.Errorf("failed to call OpenAI: %w", err) }
+		defer resp.Body.Close()
+		var r struct {
+			Choices []struct { Message struct { Content string `json:"content"` } `json:"message"` } `json:"choices"`
+			Error   *struct{ Message string `json:"message"` } `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&r)
+		if r.Error != nil { return "", fmt.Errorf("%s", r.Error.Message) }
+		if len(r.Choices) == 0 { return "", fmt.Errorf("empty response from OpenAI") }
+		return r.Choices[0].Message.Content, nil
+	}
+	// Anthropic
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"model": settings.Model, "max_tokens": 4096, "system": systemPrompt, "messages": messages,
+	})
+	req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", strings.NewReader(string(reqBody)))
+	if err != nil { return "", err }
+	req.Header.Set("x-api-key", settings.AnthropicAPIKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("content-type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil { return "", fmt.Errorf("failed to call Anthropic: %w", err) }
+	defer resp.Body.Close()
+	var r struct {
+		Content []struct{ Text string `json:"text"` } `json:"content"`
+		Error   *struct{ Message string `json:"message"` } `json:"error"`
+	}
+	json.NewDecoder(resp.Body).Decode(&r)
+	if r.Error != nil { return "", fmt.Errorf("%s", r.Error.Message) }
+	if len(r.Content) == 0 { return "", fmt.Errorf("empty response from Claude") }
+	return r.Content[0].Text, nil
+}
+
 // ── Wiki handlers ─────────────────────────────────────────────────────────────
 
 func listWikis(c *gin.Context) {
@@ -1461,6 +1508,204 @@ func deleteWiki(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+}
+
+func wikiChat(c *gin.Context) {
+	slug := c.Param("slug")
+	var body struct {
+		Question string `json:"question"`
+		History  []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"history"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.Question) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "question is required"})
+		return
+	}
+
+	uid := me(c).ID
+	settings := loadSettings(uid)
+	if settings.AIProvider == "openai" && settings.OpenAIAPIKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "OpenAI API key not configured — go to Settings first"})
+		return
+	}
+	if settings.AIProvider != "openai" && settings.AnthropicAPIKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Anthropic API key not configured — go to Settings first"})
+		return
+	}
+
+	wc := wikiCtx{dir: filepath.Join(userDir(uid), "wikis", slug)}
+	meta := wc.loadMeta()
+	if meta == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "wiki not found"})
+		return
+	}
+
+	// Build wiki context from all pages (cap at 40k chars)
+	var wikiCtxBuf strings.Builder
+	charBudget := 40000
+	for _, page := range meta.Pages {
+		if charBudget <= 0 { break }
+		content, err := wc.loadPageContent(page.ID)
+		if err != nil { continue }
+		if len(content) > charBudget { content = content[:charBudget] }
+		wikiCtxBuf.WriteString(fmt.Sprintf("\n\n## %s\n\n%s", page.Title, content))
+		charBudget -= len(content)
+	}
+
+	systemPrompt := fmt.Sprintf(`You are a helpful Q&A assistant for the repository "%s" (%s).
+Answer questions based on the wiki documentation below. Be concise, accurate, and specific.
+Reference file names, functions, and modules by name when relevant. Use markdown formatting.
+
+=== WIKI DOCUMENTATION ===
+%s`, meta.Repo, strings.Join(meta.Stack, ", "), wikiCtxBuf.String())
+
+	// Build message history
+	var messages []map[string]string
+	for _, h := range body.History {
+		messages = append(messages, map[string]string{"role": h.Role, "content": h.Content})
+	}
+	messages = append(messages, map[string]string{"role": "user", "content": body.Question})
+
+	answer, err := callAIWithHistory(settings, systemPrompt, messages)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"answer": answer})
+}
+
+// fetchChangedFiles calls GitHub compare API and returns the list of changed file paths.
+// Returns nil if comparison is not possible (no base SHA, API error, >300 files).
+func fetchChangedFiles(ctx interface{ Done() <-chan struct{} }, token, repo, baseSHA, headSHA string) []string {
+	compareURL := fmt.Sprintf("https://api.github.com/repos/%s/compare/%s...%s", repo, baseSHA, headSHA)
+	req, err := http.NewRequestWithContext(ctx.(interface {
+		Done() <-chan struct{}
+		Value(key any) any
+		Err() error
+		Deadline() (deadline time.Time, ok bool)
+	}), "GET", compareURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil { resp.Body.Close() }
+		return nil
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Files []struct {
+			Filename string `json:"filename"`
+		} `json:"files"`
+		TotalCommits int `json:"total_commits"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil
+	}
+	// GitHub caps compare at 300 files; if we hit the cap, fall back to full regen
+	if len(result.Files) >= 300 {
+		return nil
+	}
+	out := make([]string, len(result.Files))
+	for i, f := range result.Files {
+		out[i] = f.Filename
+	}
+	return out
+}
+
+// pagesForChangedFiles maps a list of changed file paths to the set of wiki page IDs
+// that need to be regenerated. Returns a map of pageID -> true.
+func pagesForChangedFiles(changedFiles []string) map[string]bool {
+	pages := map[string]bool{}
+	for _, path := range changedFiles {
+		lower := strings.ToLower(path)
+		base := strings.ToLower(filepath.Base(path))
+		ext := strings.ToLower(filepath.Ext(path))
+
+		// Overview: project-level manifests and docs
+		if isOverviewFile(base) {
+			pages["overview"] = true
+		}
+
+		// Architecture: entry points, server/app setup, config, middleware, routing
+		if isArchitectureFile(base, lower) {
+			pages["architecture"] = true
+		}
+
+		// Structure: any file change can shift the directory tree
+		pages["structure"] = true
+
+		// Modules: changes to actual source code
+		if isSourceExt(ext) {
+			pages["modules"] = true
+		}
+
+		// Data Flow: handlers, routes, services, models, DB layers
+		if isDataFlowFile(base, lower) {
+			pages["dataflow"] = true
+		}
+	}
+	return pages
+}
+
+var overviewFiles = map[string]bool{
+	"readme.md": true, "readme.rst": true, "readme.txt": true, "readme": true,
+	"changelog.md": true, "changelog": true, "contributing.md": true,
+	"license": true, "license.md": true, "license.txt": true,
+	"package.json": true, "go.mod": true, "requirements.txt": true,
+	"cargo.toml": true, "pom.xml": true, "pyproject.toml": true,
+	"setup.py": true, "setup.cfg": true, "gemfile": true,
+	"dockerfile": true, "docker-compose.yml": true, "docker-compose.yaml": true,
+	"makefile": true, "justfile": true, ".env.example": true,
+}
+
+func isOverviewFile(base string) bool {
+	if overviewFiles[base] { return true }
+	if strings.HasPrefix(base, "readme") || strings.HasPrefix(base, "changelog") { return true }
+	return false
+}
+
+var archKeywords = []string{"config", "middleware", "router", "routes", "server", "bootstrap", "init", "setup"}
+var archEntries  = map[string]bool{
+	"main.go": true, "main.py": true, "main.ts": true, "main.js": true,
+	"app.go": true, "app.py": true, "app.ts": true, "app.js": true,
+	"server.go": true, "server.py": true, "server.ts": true, "server.js": true,
+	"index.ts": true, "index.js": true,
+}
+
+func isArchitectureFile(base, lower string) bool {
+	if archEntries[base] { return true }
+	for _, kw := range archKeywords {
+		if strings.Contains(lower, kw) { return true }
+	}
+	return false
+}
+
+var sourceExts = map[string]bool{
+	".go": true, ".js": true, ".ts": true, ".jsx": true, ".tsx": true,
+	".py": true, ".rs": true, ".java": true, ".cs": true,
+	".cpp": true, ".c": true, ".rb": true, ".swift": true, ".kt": true,
+	".php": true, ".ex": true, ".exs": true,
+}
+
+func isSourceExt(ext string) bool { return sourceExts[ext] }
+
+var dataFlowKeywords = []string{
+	"handler", "controller", "route", "api", "endpoint",
+	"service", "repository", "repo", "store", "model",
+	"schema", "db", "database", "query", "migration",
+	"resolver", "usecase",
+}
+
+func isDataFlowFile(base, lower string) bool {
+	for _, kw := range dataFlowKeywords {
+		if strings.Contains(lower, kw) { return true }
+	}
+	return false
 }
 
 func wikiGenerate(c *gin.Context) {
@@ -1516,6 +1761,30 @@ func wikiGenerate(c *gin.Context) {
 		json.NewDecoder(br.Body).Decode(&branchInfo)
 		br.Body.Close()
 		commitSHA = branchInfo.Commit.SHA
+	}
+
+	// Load existing wiki for incremental regeneration
+	repoSlug := repoToSlug(body.Repo)
+	wc := newWikiCtx(uid, repoSlug)
+	existingMeta := wc.loadMeta()
+
+	// If nothing changed, return the cached wiki immediately
+	if existingMeta != nil && existingMeta.CommitSHA != "" && existingMeta.CommitSHA == commitSHA {
+		existingMeta.RegeneratedPages = []string{}
+		c.JSON(http.StatusOK, existingMeta)
+		return
+	}
+
+	// Determine which pages need regeneration
+	pagesToRegen := map[string]bool{
+		"overview": true, "architecture": true, "structure": true,
+		"modules": true, "dataflow": true,
+	}
+	if existingMeta != nil && existingMeta.CommitSHA != "" && commitSHA != "" {
+		changed := fetchChangedFiles(c.Request.Context(), token, body.Repo, existingMeta.CommitSHA, commitSHA)
+		if changed != nil {
+			pagesToRegen = pagesForChangedFiles(changed)
+		}
 	}
 
 	// Filter files
@@ -1639,12 +1908,16 @@ Base this on the actual code flows you can see.`, body.Repo),
 		},
 	}
 
-	// Generate each page
-	repoSlug := repoToSlug(body.Repo)
-	wc := newWikiCtx(uid, repoSlug)
-
+	// Generate each page (skipping pages that haven't changed)
 	var generatedPages []WikiPageMeta
+	var regenPageIDs []string
 	for _, spec := range pages {
+		pageMeta := WikiPageMeta{ID: spec.id, Title: spec.title, Slug: spec.slug, Order: spec.order}
+		if !pagesToRegen[spec.id] {
+			// Page unchanged — keep existing content on disk, just record the meta
+			generatedPages = append(generatedPages, pageMeta)
+			continue
+		}
 		userMsg := fmt.Sprintf("Repository context for `%s`:\n%s\n\n---\n\n%s", body.Repo, repoCtxStr, spec.prompt)
 		content, err := callAI(c.Request.Context(), settings, systemPrompt, userMsg)
 		if err != nil {
@@ -1655,21 +1928,25 @@ Base this on the actual code flows you can see.`, body.Repo),
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save page"})
 			return
 		}
-		generatedPages = append(generatedPages, WikiPageMeta{
-			ID: spec.id, Title: spec.title, Slug: spec.slug, Order: spec.order,
-		})
+		generatedPages = append(generatedPages, pageMeta)
+		regenPageIDs = append(regenPageIDs, spec.title)
 	}
 
+	wikiID := uuid.New().String()
+	if existingMeta != nil {
+		wikiID = existingMeta.ID
+	}
 	meta := WikiMeta{
-		ID:          uuid.New().String(),
-		Repo:        body.Repo,
-		RepoSlug:    repoSlug,
-		Branch:      body.Branch,
-		CommitSHA:   commitSHA,
-		GeneratedAt: time.Now(),
-		Pages:       generatedPages,
-		Stack:       stack,
-		Description: fmt.Sprintf("%s — %s", repoShort, stackStr),
+		ID:               wikiID,
+		Repo:             body.Repo,
+		RepoSlug:         repoSlug,
+		Branch:           body.Branch,
+		CommitSHA:        commitSHA,
+		GeneratedAt:      time.Now(),
+		Pages:            generatedPages,
+		Stack:            stack,
+		Description:      fmt.Sprintf("%s — %s", repoShort, stackStr),
+		RegeneratedPages: regenPageIDs,
 	}
 	if err := wc.saveMeta(meta); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save wiki"})
@@ -1746,6 +2023,7 @@ func main() {
 		w.GET("/:slug", getWiki)
 		w.GET("/:slug/page/:pageid", getWikiPage)
 		w.DELETE("/:slug", deleteWiki)
+		w.POST("/:slug/chat", wikiChat)
 
 		// Drive routes (browser-redirect endpoints are public, others protected)
 		api.GET("/drive/auth", driveAuth)
