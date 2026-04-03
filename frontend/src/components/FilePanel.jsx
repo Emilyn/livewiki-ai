@@ -21,6 +21,8 @@ export default function FilePanel({ selectedFile, onSelect, onToast }) {
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [draggingFile, setDraggingFile]   = useState(null)  // file object being dragged
+  const [dropTarget, setDropTarget]       = useState(null)  // folder id or '' for unfiled
   const newFolderRef = useRef()
   const inputRef = useRef()
 
@@ -124,11 +126,22 @@ export default function FilePanel({ selectedFile, onSelect, onToast }) {
   const toggleCollapse = (folderId) =>
     setCollapsed(c => ({ ...c, [folderId]: !c[folderId] }))
 
+  const handleFileDrop = (folderId) => {
+    if (!draggingFile || draggingFile.folder_id === folderId) return
+    handleAssignFolder(draggingFile.id, folderId)
+    setDraggingFile(null)
+    setDropTarget(null)
+  }
+
   const renderFile = (f) => (
     <div
       key={f.id}
       className={`file-item${selectedFile?.id === f.id ? ' active' : ''}`}
       onClick={() => onSelect(f)}
+      draggable
+      onDragStart={e => { e.stopPropagation(); setDraggingFile(f) }}
+      onDragEnd={() => { setDraggingFile(null); setDropTarget(null) }}
+      style={{ cursor: 'grab', opacity: draggingFile?.id === f.id ? 0.5 : 1 }}
     >
       <div className="file-icon">
         <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -271,7 +284,14 @@ export default function FilePanel({ selectedFile, onSelect, onToast }) {
                   const isCollapsed = collapsed[folder.id]
                   return (
                     <div key={folder.id} className="folder-section">
-                      <div className="folder-row" onClick={() => toggleCollapse(folder.id)}>
+                      <div
+                        className="folder-row"
+                        onClick={() => toggleCollapse(folder.id)}
+                        onDragOver={e => { if (draggingFile && draggingFile.folder_id !== folder.id) { e.preventDefault(); setDropTarget(folder.id) } }}
+                        onDragLeave={() => setDropTarget(null)}
+                        onDrop={e => { e.preventDefault(); handleFileDrop(folder.id) }}
+                        style={{ outline: dropTarget === folder.id ? '2px solid var(--accent)' : 'none', outlineOffset: -2, borderRadius: 6, transition: 'outline 0.1s' }}
+                      >
                         <span className={`folder-chevron${isCollapsed ? ' collapsed' : ''}`}>▼</span>
                         <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" strokeWidth="2">
                           <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
@@ -304,15 +324,20 @@ export default function FilePanel({ selectedFile, onSelect, onToast }) {
                 })}
 
                 {/* Unfiled files */}
-                {unfiledFiles.length > 0 && (
-                  <>
+                {(unfiledFiles.length > 0 || (draggingFile && draggingFile.folder_id)) && (
+                  <div
+                    onDragOver={e => { if (draggingFile?.folder_id) { e.preventDefault(); setDropTarget('') } }}
+                    onDragLeave={() => setDropTarget(null)}
+                    onDrop={e => { e.preventDefault(); handleFileDrop('') }}
+                    style={{ borderRadius: 6, outline: dropTarget === '' ? '2px solid var(--accent)' : 'none', outlineOffset: -2, transition: 'outline 0.1s' }}
+                  >
                     {folders.length > 0 && (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--muted)', padding: '0.5rem 0.25rem 0.25rem', fontWeight: 500 }}>
-                        Unfiled
+                      <div style={{ fontSize: '0.75rem', color: dropTarget === '' ? 'var(--accent)' : 'var(--muted)', padding: '0.5rem 0.25rem 0.25rem', fontWeight: 500, transition: 'color 0.1s' }}>
+                        {dropTarget === '' ? 'Drop to remove from folder' : 'Unfiled'}
                       </div>
                     )}
                     {unfiledFiles.map(renderFile)}
-                  </>
+                  </div>
                 )}
               </div>
             )}

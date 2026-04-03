@@ -5,7 +5,17 @@ import Toast from './components/Toast'
 import AuthPage from './components/AuthPage'
 import SettingsPage from './components/SettingsPage'
 import WikiPage from './components/WikiPage'
+import SharedWikiPage from './components/SharedWikiPage'
 import { authMe, saveGitHubToken } from './api'
+
+// Shared wiki route — no auth required
+const shareMatch = window.location.pathname.match(/^\/share\/([^/]+)/)
+if (shareMatch) {
+  // Render shared wiki immediately, bypass auth shell
+  const token = shareMatch[1]
+  // Defer to component tree
+  window.__shareToken = token
+}
 
 // Icons
 function IconFiles() {
@@ -61,6 +71,11 @@ function useTheme() {
 }
 
 export default function App() {
+  // Shared wiki shortcut — no auth shell needed
+  if (window.__shareToken) {
+    return <SharedWikiPage token={window.__shareToken} />
+  }
+
   const [tab, setTab] = useState('local')
   const [selectedFile, setSelectedFile] = useState(null)
   const [toasts, setToasts] = useState([])

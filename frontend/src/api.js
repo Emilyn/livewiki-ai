@@ -89,10 +89,20 @@ export const generateWiki     = (body) => api.post('/wiki/generate', body).then(
 export const listWikis      = () => api.get('/wiki').then(r => r.data)
 export const getWiki        = (slug) => api.get(`/wiki/${slug}`).then(r => r.data)
 export const getWikiPage    = (slug, pageId) => api.get(`/wiki/${slug}/page/${pageId}`).then(r => r.data)
-export const generateWikiV2 = (repo, branch) => api.post('/wiki/generate', { repo, branch }).then(r => r.data)
+export const generateWikiV2 = (repo, branch, templateId) =>
+  api.post('/wiki/generate', { repo, branch, template_id: templateId || undefined }).then(r => r.data)
 export const deleteWikiV2   = (slug) => api.delete(`/wiki/${slug}`)
 export const wikiChat       = (slug, question, history) =>
   api.post(`/wiki/${slug}/chat`, { question, history }).then(r => r.data)
+export const getWikiShare     = (token) => api.get(`/wiki/share/${token}`).then(r => r.data)
+export const getWikiSharePage = (token, pageId) =>
+  api.get(`/wiki/share/${token}/page/${pageId}`, { responseType: 'text' }).then(r => r.data)
+
+// ── Wiki templates ────────────────────────────────────────────────────────────
+export const listTemplates   = () => api.get('/wiki-templates').then(r => r.data)
+export const createTemplate  = (data) => api.post('/wiki-templates', data).then(r => r.data)
+export const updateTemplate  = (id, data) => api.put(`/wiki-templates/${id}`, data).then(r => r.data)
+export const deleteTemplate  = (id) => api.delete(`/wiki-templates/${id}`)
 
 // ── Folders ───────────────────────────────────────────────────────────────────
 export const listFolders      = () => api.get('/files/folders').then(r => r.data)

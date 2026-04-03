@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   getSettings, putSettings,
   getGitHubStatus, disconnectGitHub, startGitHubAuth,
+  listTemplates, createTemplate, updateTemplate, deleteTemplate,
 } from '../api'
 
 const CLAUDE_MODELS = [
@@ -79,6 +80,11 @@ export default function SettingsPage({ onToast }) {
   const [loading, setLoading]     = useState(true)
   const [ghStatus, setGhStatus]   = useState(null)
   const [ghLoading, setGhLoading] = useState(true)
+  const [templates, setTemplates]     = useState([])
+  const [editingTpl, setEditingTpl]   = useState(null)  // null | 'new' | template object
+  const [tplDraft, setTplDraft]       = useState('')     // JSON string being edited
+  const [tplError, setTplError]       = useState('')
+  const [tplSaving, setTplSaving]     = useState(false)
 
   useEffect(() => {
     getSettings()
@@ -95,7 +101,54 @@ export default function SettingsPage({ onToast }) {
       .then(setGhStatus)
       .catch(() => setGhStatus({ connected: false, configured: false, accounts: [] }))
       .finally(() => setGhLoading(false))
+    listTemplates().then(setTemplates).catch(() => {})
   }, [])
+
+  const openNewTemplate = () => {
+    setTplDraft(JSON.stringify({
+      name: 'My Template',
+      pages: [
+        { id: 'overview', title: 'Overview', prompt: 'Write an overview of this project...' },
+        { id: 'api', title: 'API Reference', prompt: 'Document all API endpoints with request/response examples.' },
+      ]
+    }, null, 2))
+    setTplError('')
+    setEditingTpl('new')
+  }
+
+  const openEditTemplate = (tpl) => {
+    setTplDraft(JSON.stringify({ name: tpl.name, pages: tpl.pages }, null, 2))
+    setTplError('')
+    setEditingTpl(tpl)
+  }
+
+  const handleSaveTemplate = async () => {
+    let parsed
+    try { parsed = JSON.parse(tplDraft) } catch { setTplError('Invalid JSON'); return }
+    if (!parsed.name?.trim()) { setTplError('Template must have a name'); return }
+    if (!Array.isArray(parsed.pages) || parsed.pages.length === 0) { setTplError('Template must have at least one page'); return }
+    setTplSaving(true)
+    try {
+      if (editingTpl === 'new') {
+        const created = await createTemplate({ name: parsed.name.trim(), pages: parsed.pages })
+        setTemplates(t => [...t, created])
+      } else {
+        const updated = await updateTemplate(editingTpl.id, { name: parsed.name.trim(), pages: parsed.pages })
+        setTemplates(t => t.map(x => x.id === updated.id ? updated : x))
+      }
+      setEditingTpl(null)
+      onToast('Template saved')
+    } catch { setTplError('Save failed') }
+    finally { setTplSaving(false) }
+  }
+
+  const handleDeleteTemplate = async (tpl) => {
+    try {
+      await deleteTemplate(tpl.id)
+      setTemplates(t => t.filter(x => x.id !== tpl.id))
+      onToast('Template deleted')
+    } catch { onToast('Delete failed', 'error') }
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -216,6 +269,67 @@ export default function SettingsPage({ onToast }) {
                 <GitHubMark size={14} />
                 <span style={{ flex: 1, fontSize: '0.875rem', fontWeight: 500 }}>@{login}</span>
                 <button className="btn-danger-sm" onClick={() => handleGhDisconnect(login)}>Disconnect</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+
+      {/* Wiki Templates */}
+      <SectionCard
+        icon={<svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>}
+        title="Wiki Templates"
+        subtitle="Reusable page configs for wiki generation"
+        action={
+          editingTpl ? null : (
+            <button className="btn-add" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={openNewTemplate}>
+              + New template
+            </button>
+          )
+        }
+      >
+        {editingTpl ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--muted)', margin: 0 }}>
+              Edit as JSON. The <code>name</code> field sets the template name. Each page needs <code>id</code>, <code>title</code>, and <code>prompt</code>.
+            </p>
+            <textarea
+              value={tplDraft}
+              onChange={e => { setTplDraft(e.target.value); setTplError('') }}
+              spellCheck={false}
+              rows={16}
+              style={{
+                fontFamily: "'Fira Code', 'Cascadia Code', monospace",
+                fontSize: '0.8125rem', lineHeight: 1.6,
+                background: 'var(--bg)', color: 'var(--text)',
+                border: `1px solid ${tplError ? 'var(--danger)' : 'var(--border)'}`,
+                borderRadius: 8, padding: '0.75rem', resize: 'vertical', outline: 'none',
+              }}
+              onFocus={e => e.target.style.borderColor = tplError ? 'var(--danger)' : 'var(--accent)'}
+              onBlur={e => e.target.style.borderColor = tplError ? 'var(--danger)' : 'var(--border)'}
+            />
+            {tplError && <p style={{ color: 'var(--danger)', fontSize: '0.8125rem', margin: 0 }}>{tplError}</p>}
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button className="btn-primary" onClick={handleSaveTemplate} disabled={tplSaving} style={{ minWidth: 80 }}>
+                {tplSaving ? 'Saving\u2026' : 'Save'}
+              </button>
+              <button className="btn-secondary" onClick={() => setEditingTpl(null)}>Cancel</button>
+            </div>
+          </div>
+        ) : templates.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: '0.875rem', margin: 0 }}>
+            No templates yet. Create one to reuse custom page configs across wikis.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+            {templates.map(tpl => (
+              <div key={tpl.id} style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', padding: '0.5rem 0.75rem', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 500, fontSize: '0.875rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tpl.name}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.125rem' }}>{tpl.pages?.length || 0} pages</div>
+                </div>
+                <button className="btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', flexShrink: 0 }} onClick={() => openEditTemplate(tpl)}>Edit</button>
+                <button className="btn-danger-sm" style={{ flexShrink: 0 }} onClick={() => handleDeleteTemplate(tpl)}>Delete</button>
               </div>
             ))}
           </div>

@@ -6,6 +6,7 @@ import {
   getGitHubStatus,
   listGitHubRepos,
   listWikis, getWikiPage, generateWikiV2, deleteWikiV2, wikiChat,
+  listTemplates,
 } from '../api'
 
 mermaid.initialize({ startOnLoad: false, theme: 'dark', darkMode: true })
@@ -36,9 +37,15 @@ function IconChat({ size = 14 }) {
 function IconSend({ size = 14 }) {
   return <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
 }
+function IconExpand({ size = 14 }) {
+  return <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+}
+function IconCollapse({ size = 14 }) {
+  return <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="10" y1="14" x2="3" y2="21"/><line x1="21" y1="3" x2="14" y2="10"/></svg>
+}
 
 // ── Chat panel ────────────────────────────────────────────────────────────────
-function ChatPanel({ wikiSlug, onClose }) {
+function ChatPanel({ wikiSlug, onClose, expanded = false, onToggleExpand }) {
   const [messages, setMessages] = useState([])  // [{role, content}]
   const [input, setInput]       = useState('')
   const [loading, setLoading]   = useState(false)
@@ -82,6 +89,11 @@ function ChatPanel({ wikiSlug, onClose }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <IconChat size={15} />
         <span style={{ fontWeight: 600, fontSize: '0.9375rem', flex: 1 }}>Ask AI</span>
+        {onToggleExpand && (
+          <button className="btn-icon" onClick={onToggleExpand} title={expanded ? 'Collapse' : 'Expand'} style={{ opacity: 0.6 }}>
+            {expanded ? <IconCollapse size={13} /> : <IconExpand size={13} />}
+          </button>
+        )}
         <button className="btn-icon" onClick={onClose} title="Close chat" style={{ opacity: 0.6 }}>✕</button>
       </div>
 
@@ -189,21 +201,24 @@ function MermaidBlock({ code }) {
 }
 
 function CodeBlock({ className, children }) {
-  const lang = (className || '').replace('language-', '')
   const code = String(children).trimEnd()
+  // Inline code has no language class and no newlines
+  if (!className && !code.includes('\n')) return <code>{children}</code>
+  const lang = (className || '').replace('language-', '')
   if (lang === 'mermaid') return <MermaidBlock code={code} />
   return <pre><code className={className}>{code}</code></pre>
 }
 
 // ── Progress steps ────────────────────────────────────────────────────────────
-const PAGE_TITLES = ['Overview', 'Architecture', 'Project Structure', 'Core Modules', 'Data Flow']
+const DEFAULT_PAGE_TITLES = ['Overview', 'Architecture', 'Project Structure', 'Core Modules', 'Data Flow']
 
-function GeneratingOverlay({ repo }) {
+function GeneratingOverlay({ repo, pages = DEFAULT_PAGE_TITLES }) {
   const [step, setStep] = useState(0)
   useEffect(() => {
-    const interval = setInterval(() => setStep(s => Math.min(s + 1, PAGE_TITLES.length - 1)), 12000)
+    setStep(0)
+    const interval = setInterval(() => setStep(s => Math.min(s + 1, pages.length - 1)), 12000)
     return () => clearInterval(interval)
-  }, [])
+  }, [pages])
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 400, gap: '1.5rem', textAlign: 'center' }}>
       <div style={{ width: 48, height: 48, background: 'rgba(99,102,241,0.15)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -214,7 +229,7 @@ function GeneratingOverlay({ repo }) {
         <div style={{ fontSize: '0.8125rem', color: 'var(--muted)' }}>Analyzing codebase and writing documentation…</div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', width: '100%', maxWidth: 320 }}>
-        {PAGE_TITLES.map((title, i) => (
+        {pages.map((title, i) => (
           <div key={title} style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', fontSize: '0.8125rem' }}>
             <div style={{
               width: 20, height: 20, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -285,13 +300,22 @@ export default function WikiPage({ onToast }) {
   const [activePage, setActivePage] = useState(null)   // WikiPageMeta
   const [generating, setGenerating] = useState(false)
   const [genRepo, setGenRepo]       = useState('')
+  const [genPages, setGenPages]     = useState(DEFAULT_PAGE_TITLES)
 
   // UI state
   const [view, setView]             = useState('list') // 'list' | 'new' | 'wiki'
   const [confirmDelete, setConfirmDelete] = useState(null)
-  const [showChat, setShowChat]     = useState(false)
-  const [expandedRepo, setExpandedRepo] = useState(null)  // repo id for branch picker
+  const [showChat, setShowChat]       = useState(false)
+  const [chatExpanded, setChatExpanded] = useState(false)
+  const [expandedRepo, setExpandedRepo] = useState(null)
   const [branchInput, setBranchInput]   = useState('')
+  const [pageSearch, setPageSearch]     = useState('')
+  const [copiedShare, setCopiedShare]   = useState(false)
+  const [templates, setTemplates] = useState([])
+  const [selectedTemplateId, setSelectedTemplateId] = useState('')  // '' = default/wiki.json
+  const [showRegenModal, setShowRegenModal] = useState(false)
+  const [regenBranch, setRegenBranch] = useState('')
+  const [regenTemplateId, setRegenTemplateId] = useState('')
 
   useEffect(() => {
     getGitHubStatus()
@@ -306,14 +330,22 @@ export default function WikiPage({ onToast }) {
     listWikis()
       .then(w => { setWikis(w || []); setWikisLoaded(true) })
       .catch(() => setWikisLoaded(true))
+    listTemplates().then(setTemplates).catch(() => {})
   }, [])
 
-  const handleGenerate = useCallback(async (repo, branch) => {
+  const handleGenerate = useCallback(async (repo, branch, templateId = '') => {
+    // Resolve page titles for the progress overlay
+    if (templateId) {
+      const tpl = templates.find(t => t.id === templateId)
+      setGenPages(tpl ? tpl.pages.map(p => p.title) : DEFAULT_PAGE_TITLES)
+    } else {
+      setGenPages(DEFAULT_PAGE_TITLES)
+    }
     setGenerating(true)
     setGenRepo(repo.full_name)
     setView('generating')
     try {
-      const meta = await generateWikiV2(repo.full_name, branch || repo.default_branch)
+      const meta = await generateWikiV2(repo.full_name, branch || repo.default_branch, templateId)
       setWikis(w => {
         const idx = w.findIndex(x => x.repo_slug === meta.repo_slug)
         if (idx >= 0) { const next = [...w]; next[idx] = meta; return next }
@@ -380,7 +412,7 @@ export default function WikiPage({ onToast }) {
     return (
       <div className="card" style={{ maxWidth: 560 }}>
         <div className="card-body">
-          <GeneratingOverlay repo={genRepo} />
+          <GeneratingOverlay repo={genRepo} pages={genPages} />
         </div>
       </div>
     )
@@ -404,13 +436,30 @@ export default function WikiPage({ onToast }) {
               {activeWiki.stack?.map(s => (
                 <span key={s} style={{ fontSize: '0.6875rem', background: 'rgba(99,102,241,0.1)', color: 'var(--accent)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 4, padding: '0.1rem 0.4rem' }}>{s}</span>
               ))}
+              {activeWiki.has_custom_config && (
+                <span style={{ fontSize: '0.6875rem', background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 4, padding: '0.1rem 0.4rem' }}>wiki.json</span>
+              )}
             </div>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
+            {activeWiki.share_token && (
+              <button
+                className="btn-secondary"
+                style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.375rem', color: copiedShare ? 'var(--success)' : undefined }}
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/share/${activeWiki.share_token}`)
+                  setCopiedShare(true)
+                  setTimeout(() => setCopiedShare(false), 2000)
+                }}
+              >
+                <svg width={12} height={12} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M9 17H7A5 5 0 017 7h2"/><path d="M15 7h2a5 5 0 110 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                {copiedShare ? 'Copied!' : 'Share'}
+              </button>
+            )}
             <button
               className={showChat ? 'btn-primary' : 'btn-secondary'}
               style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}
-              onClick={() => setShowChat(v => !v)}
+              onClick={() => { setShowChat(v => !v); setChatExpanded(false) }}
             >
               <IconChat size={12} /> {showChat ? 'Close Chat' : 'Ask AI'}
             </button>
@@ -418,9 +467,9 @@ export default function WikiPage({ onToast }) {
               className="btn-secondary"
               style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}
               onClick={() => {
-                const repo = repos.find(r => r.full_name === activeWiki.repo)
-                if (repo) handleGenerate(repo, activeWiki.branch)
-                else onToast('Repo not found', 'error')
+                setRegenBranch(activeWiki.branch)
+                setRegenTemplateId(activeWiki.template_id || '')
+                setShowRegenModal(true)
               }}
             >
               <IconRefresh size={12} /> Regenerate
@@ -436,33 +485,49 @@ export default function WikiPage({ onToast }) {
         </div>
 
         {/* Wiki layout */}
-        <div style={{ display: 'grid', gridTemplateColumns: showChat ? '200px 1fr 380px' : '200px 1fr', gap: '1rem', alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: showChat && !chatExpanded ? '200px 1fr 380px' : '200px 1fr', gap: '1rem', alignItems: 'start' }}>
           {/* Page sidebar */}
           <div className="card">
             <div className="card-body" style={{ padding: '0.5rem' }}>
-              {activeWiki.pages.map(page => (
-                <button
-                  key={page.id}
-                  onClick={() => { setActivePage(page); setShowChat(false) }}
-                  style={{
-                    width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem',
-                    padding: '0.5rem 0.625rem', borderRadius: 6, fontSize: '0.8125rem',
-                    background: activePage?.id === page.id && !showChat ? 'rgba(99,102,241,0.1)' : 'transparent',
-                    color: activePage?.id === page.id && !showChat ? 'var(--accent)' : 'var(--text)',
-                    border: `1px solid ${activePage?.id === page.id && !showChat ? 'rgba(99,102,241,0.25)' : 'transparent'}`,
-                    cursor: 'pointer', textAlign: 'left', fontWeight: activePage?.id === page.id && !showChat ? 600 : 400,
-                    transition: 'all 0.12s',
-                  }}
-                  onMouseEnter={e => { if (!(activePage?.id === page.id && !showChat)) e.currentTarget.style.background = 'var(--surface2)' }}
-                  onMouseLeave={e => { if (!(activePage?.id === page.id && !showChat)) e.currentTarget.style.background = 'transparent' }}
-                >
-                  <IconBook size={13} />
-                  {page.title}
-                </button>
-              ))}
+              <input
+                placeholder="Search pages…"
+                value={pageSearch}
+                onChange={e => setPageSearch(e.target.value)}
+                style={{ width: '100%', fontSize: '0.8125rem', padding: '0.3rem 0.55rem', marginBottom: '0.375rem' }}
+              />
+              {activeWiki.pages
+                .filter(p => p.title.toLowerCase().includes(pageSearch.toLowerCase()))
+                .map(page => {
+                  const isActive = activePage?.id === page.id && !showChat
+                  const wasUpdated = activeWiki.regenerated_pages?.includes(page.title)
+                  return (
+                    <button
+                      key={page.id}
+                      onClick={() => { setActivePage(page); setShowChat(false) }}
+                      style={{
+                        width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem',
+                        padding: '0.5rem 0.625rem', borderRadius: 6, fontSize: '0.8125rem',
+                        background: isActive ? 'rgba(99,102,241,0.1)' : 'transparent',
+                        color: isActive ? 'var(--accent)' : 'var(--text)',
+                        border: `1px solid ${isActive ? 'rgba(99,102,241,0.25)' : 'transparent'}`,
+                        cursor: 'pointer', textAlign: 'left', fontWeight: isActive ? 600 : 400,
+                        transition: 'all 0.12s',
+                      }}
+                      onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--surface2)' }}
+                      onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+                    >
+                      <IconBook size={13} />
+                      <span style={{ flex: 1, textAlign: 'left' }}>{page.title}</span>
+                      {wasUpdated && (
+                        <span title="Updated in last regen" style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981', flexShrink: 0 }} />
+                      )}
+                    </button>
+                  )
+                })
+              }
               <div style={{ borderTop: '1px solid var(--border)', marginTop: '0.375rem', paddingTop: '0.375rem' }}>
                 <button
-                  onClick={() => setShowChat(v => !v)}
+                  onClick={() => { setShowChat(v => !v); setChatExpanded(false) }}
                   style={{
                     width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem',
                     padding: '0.5rem 0.625rem', borderRadius: 6, fontSize: '0.8125rem',
@@ -480,18 +545,69 @@ export default function WikiPage({ onToast }) {
             </div>
           </div>
 
-          {/* Page content */}
-          <div className="card" style={{ minHeight: 500 }}>
-            <WikiPageViewer wikiSlug={activeWiki.repo_slug} page={activePage} />
+          {/* Page content — or expanded chat */}
+          <div className="card" style={{ minHeight: 500, display: 'flex', flexDirection: 'column', ...(showChat && chatExpanded ? { position: 'sticky', top: '1rem', maxHeight: 'calc(100vh - 8rem)', overflow: 'hidden' } : {}) }}>
+            {showChat && chatExpanded
+              ? <ChatPanel
+                  wikiSlug={activeWiki.repo_slug}
+                  onClose={() => { setShowChat(false); setChatExpanded(false) }}
+                  expanded
+                  onToggleExpand={() => setChatExpanded(false)}
+                />
+              : <WikiPageViewer wikiSlug={activeWiki.repo_slug} page={activePage} />
+            }
           </div>
 
-          {/* Chat panel */}
-          {showChat && (
+          {/* Side chat panel — only when not expanded */}
+          {showChat && !chatExpanded && (
             <div className="card" style={{ minHeight: 500, display: 'flex', flexDirection: 'column', position: 'sticky', top: '1rem', maxHeight: 'calc(100vh - 8rem)', overflow: 'hidden' }}>
-              <ChatPanel wikiSlug={activeWiki.repo_slug} onClose={() => setShowChat(false)} />
+              <ChatPanel
+                wikiSlug={activeWiki.repo_slug}
+                onClose={() => setShowChat(false)}
+                expanded={false}
+                onToggleExpand={() => setChatExpanded(true)}
+              />
             </div>
           )}
         </div>
+
+        {/* Regen modal */}
+        {showRegenModal && (
+          <div className="modal-backdrop" onClick={() => setShowRegenModal(false)}>
+            <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
+              <h3 style={{ marginBottom: '1rem' }}>Regenerate wiki</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <label style={{ fontSize: '0.8125rem', color: 'var(--muted)', minWidth: 70, flexShrink: 0 }}>Branch:</label>
+                  <input value={regenBranch} onChange={e => setRegenBranch(e.target.value)} style={{ flex: 1, fontSize: '0.8125rem' }} />
+                </div>
+                {templates.length > 0 && (
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.8125rem', color: 'var(--muted)', minWidth: 70, flexShrink: 0 }}>Template:</label>
+                    <select value={regenTemplateId} onChange={e => setRegenTemplateId(e.target.value)} style={{ flex: 1, fontSize: '0.8125rem' }}>
+                      <option value="">Default (5 pages)</option>
+                      {templates.map(t => <option key={t.id} value={t.id}>{t.name} ({t.pages?.length || 0} pages)</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+              <div className="modal-actions">
+                <button className="btn-secondary" onClick={() => setShowRegenModal(false)}>Cancel</button>
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    setShowRegenModal(false)
+                    const repo = repos.find(r => r.full_name === activeWiki.repo)
+                    if (repo) handleGenerate(repo, regenBranch, regenTemplateId)
+                    else onToast('Repo not found', 'error')
+                  }}
+                >
+                  Regenerate
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Delete confirm modal */}
         {confirmDelete && (
@@ -557,23 +673,41 @@ export default function WikiPage({ onToast }) {
                       </div>
                     </div>
                     {isExpanded && (
-                      <div style={{ padding: '0.75rem 1rem', background: 'var(--surface2)', borderTop: '1px solid var(--border)', borderRadius: '0 0 8px 8px', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                        <label style={{ fontSize: '0.8125rem', color: 'var(--muted)', flexShrink: 0 }}>Branch:</label>
-                        <input
-                          value={branchInput}
-                          onChange={e => setBranchInput(e.target.value)}
-                          onClick={e => e.stopPropagation()}
-                          onKeyDown={e => { if (e.key === 'Enter') handleGenerate(r, branchInput) }}
-                          style={{ flex: 1, fontSize: '0.8125rem', padding: '0.35rem 0.6rem' }}
-                          autoFocus
-                        />
-                        <button
-                          className="btn-primary"
-                          style={{ fontSize: '0.8125rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.375rem', flexShrink: 0 }}
-                          onClick={e => { e.stopPropagation(); handleGenerate(r, branchInput) }}
-                        >
-                          <IconSparkle size={12} /> Generate
-                        </button>
+                      <div style={{ padding: '0.75rem 1rem', background: 'var(--surface2)', borderTop: '1px solid var(--border)', borderRadius: '0 0 8px 8px', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          <label style={{ fontSize: '0.8125rem', color: 'var(--muted)', flexShrink: 0, minWidth: 60 }}>Branch:</label>
+                          <input
+                            value={branchInput}
+                            onChange={e => setBranchInput(e.target.value)}
+                            onClick={e => e.stopPropagation()}
+                            onKeyDown={e => { if (e.key === 'Enter') handleGenerate(r, branchInput, selectedTemplateId) }}
+                            style={{ flex: 1, fontSize: '0.8125rem', padding: '0.35rem 0.6rem' }}
+                            autoFocus
+                          />
+                        </div>
+                        {templates.length > 0 && (
+                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                            <label style={{ fontSize: '0.8125rem', color: 'var(--muted)', flexShrink: 0, minWidth: 60 }}>Template:</label>
+                            <select
+                              value={selectedTemplateId}
+                              onChange={e => setSelectedTemplateId(e.target.value)}
+                              onClick={e => e.stopPropagation()}
+                              style={{ flex: 1, fontSize: '0.8125rem', padding: '0.35rem 0.6rem' }}
+                            >
+                              <option value="">Default (5 pages)</option>
+                              {templates.map(t => <option key={t.id} value={t.id}>{t.name} ({t.pages?.length || 0} pages)</option>)}
+                            </select>
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                          <button
+                            className="btn-primary"
+                            style={{ fontSize: '0.8125rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}
+                            onClick={e => { e.stopPropagation(); handleGenerate(r, branchInput, selectedTemplateId) }}
+                          >
+                            <IconSparkle size={12} /> Generate
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>

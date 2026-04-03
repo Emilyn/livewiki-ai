@@ -171,6 +171,75 @@ type WikiMeta struct {
 	Stack            []string       `json:"stack"`
 	Description      string         `json:"description"`
 	RegeneratedPages []string       `json:"regenerated_pages,omitempty"`
+	ShareToken       string         `json:"share_token,omitempty"`
+	HasCustomConfig  bool           `json:"has_custom_config,omitempty"`
+	TemplateID       string         `json:"template_id,omitempty"`
+}
+
+// ── Shares index (token → uid+slug, no auth required for reads) ───────────────
+type shareEntry struct {
+	UID  string `json:"uid"`
+	Slug string `json:"slug"`
+}
+
+// ── Wiki templates ─────────────────────────────────────────────────────────────
+type TemplatePageSpec struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Slug   string `json:"slug,omitempty"`
+	Prompt string `json:"prompt"`
+}
+
+type WikiTemplate struct {
+	ID        string             `json:"id"`
+	Name      string             `json:"name"`
+	Pages     []TemplatePageSpec `json:"pages"`
+	CreatedAt time.Time          `json:"created_at"`
+	UpdatedAt time.Time          `json:"updated_at"`
+}
+
+func templatesPath(uid string) string {
+	return filepath.Join(userDir(uid), "wiki_templates.json")
+}
+
+func loadTemplates(uid string) []WikiTemplate {
+	data, err := os.ReadFile(templatesPath(uid))
+	if err != nil { return []WikiTemplate{} }
+	var ts []WikiTemplate
+	json.Unmarshal(data, &ts)
+	if ts == nil { return []WikiTemplate{} }
+	return ts
+}
+
+func saveTemplates(uid string, ts []WikiTemplate) {
+	data, _ := json.MarshalIndent(ts, "", "  ")
+	os.WriteFile(templatesPath(uid), data, 0644)
+}
+
+func findTemplate(uid, id string) *WikiTemplate {
+	for _, t := range loadTemplates(uid) {
+		if t.ID == id {
+			cp := t
+			return &cp
+		}
+	}
+	return nil
+}
+
+func sharesIndexPath() string { return filepath.Join(uploadsDir, "shares.json") }
+
+func loadSharesIndex() map[string]shareEntry {
+	data, err := os.ReadFile(sharesIndexPath())
+	if err != nil { return map[string]shareEntry{} }
+	var idx map[string]shareEntry
+	json.Unmarshal(data, &idx)
+	if idx == nil { return map[string]shareEntry{} }
+	return idx
+}
+
+func saveSharesIndex(idx map[string]shareEntry) {
+	data, _ := json.MarshalIndent(idx, "", "  ")
+	os.WriteFile(sharesIndexPath(), data, 0644)
 }
 
 type wikiCtx struct {
@@ -1502,12 +1571,109 @@ func getWikiPage(c *gin.Context) {
 
 func deleteWiki(c *gin.Context) {
 	slug := c.Param("slug")
-	dir := filepath.Join(userDir(me(c).ID), "wikis", slug)
+	uid := me(c).ID
+	// Remove share token from index before deleting
+	wc := wikiCtx{dir: filepath.Join(userDir(uid), "wikis", slug)}
+	if m := wc.loadMeta(); m != nil && m.ShareToken != "" {
+		idx := loadSharesIndex()
+		delete(idx, m.ShareToken)
+		saveSharesIndex(idx)
+	}
+	dir := filepath.Join(userDir(uid), "wikis", slug)
 	if err := os.RemoveAll(dir); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete wiki"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+}
+
+func wikiShareGet(c *gin.Context) {
+	token := c.Param("token")
+	idx := loadSharesIndex()
+	entry, ok := idx[token]
+	if !ok { c.JSON(http.StatusNotFound, gin.H{"error": "wiki not found"}); return }
+	wc := wikiCtx{dir: filepath.Join(userDir(entry.UID), "wikis", entry.Slug)}
+	m := wc.loadMeta()
+	if m == nil { c.JSON(http.StatusNotFound, gin.H{"error": "wiki not found"}); return }
+	c.JSON(http.StatusOK, m)
+}
+
+func wikiSharePage(c *gin.Context) {
+	token := c.Param("token")
+	pageID := c.Param("pageid")
+	idx := loadSharesIndex()
+	entry, ok := idx[token]
+	if !ok { c.JSON(http.StatusNotFound, gin.H{"error": "wiki not found"}); return }
+	wc := wikiCtx{dir: filepath.Join(userDir(entry.UID), "wikis", entry.Slug)}
+	content, err := wc.loadPageContent(pageID)
+	if err != nil { c.JSON(http.StatusNotFound, gin.H{"error": "page not found"}); return }
+	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(content))
+}
+
+func listWikiTemplates(c *gin.Context) {
+	ts := loadTemplates(me(c).ID)
+	c.JSON(http.StatusOK, ts)
+}
+
+func createWikiTemplate(c *gin.Context) {
+	var body struct {
+		Name  string             `json:"name"`
+		Pages []TemplatePageSpec `json:"pages"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.Name) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+	uid := me(c).ID
+	ts := loadTemplates(uid)
+	now := time.Now()
+	tpl := WikiTemplate{
+		ID: uuid.New().String(), Name: strings.TrimSpace(body.Name),
+		Pages: body.Pages, CreatedAt: now, UpdatedAt: now,
+	}
+	ts = append(ts, tpl)
+	saveTemplates(uid, ts)
+	c.JSON(http.StatusCreated, tpl)
+}
+
+func updateWikiTemplate(c *gin.Context) {
+	id := c.Param("tid")
+	var body struct {
+		Name  string             `json:"name"`
+		Pages []TemplatePageSpec `json:"pages"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	uid := me(c).ID
+	ts := loadTemplates(uid)
+	for i, t := range ts {
+		if t.ID == id {
+			if strings.TrimSpace(body.Name) != "" { ts[i].Name = strings.TrimSpace(body.Name) }
+			if body.Pages != nil { ts[i].Pages = body.Pages }
+			ts[i].UpdatedAt = time.Now()
+			saveTemplates(uid, ts)
+			c.JSON(http.StatusOK, ts[i])
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+}
+
+func deleteWikiTemplate(c *gin.Context) {
+	id := c.Param("tid")
+	uid := me(c).ID
+	ts := loadTemplates(uid)
+	for i, t := range ts {
+		if t.ID == id {
+			ts = append(ts[:i], ts[i+1:]...)
+			saveTemplates(uid, ts)
+			c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
 }
 
 func wikiChat(c *gin.Context) {
@@ -1710,8 +1876,9 @@ func isDataFlowFile(base, lower string) bool {
 
 func wikiGenerate(c *gin.Context) {
 	var body struct {
-		Repo   string `json:"repo"`
-		Branch string `json:"branch"`
+		Repo       string `json:"repo"`
+		Branch     string `json:"branch"`
+		TemplateID string `json:"template_id"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil || body.Repo == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "repo is required"})
@@ -1808,7 +1975,59 @@ func wikiGenerate(c *gin.Context) {
 		return string(decoded), nil
 	}
 
-	// Detect tech stack
+	// ── Determine page specs: user template > wiki.json > defaults ────────────
+	type pageSpec struct {
+		id, title, slug string
+		order           int
+		prompt          string
+	}
+	var pages []pageSpec
+	hasCustomConfig := false
+
+	// 1. User-selected template
+	if body.TemplateID != "" {
+		if tpl := findTemplate(uid, body.TemplateID); tpl != nil {
+			for i, p := range tpl.Pages {
+				id := p.ID
+				if id == "" { id = fmt.Sprintf("page-%d", i) }
+				slug := p.Slug
+				if slug == "" { slug = strings.ReplaceAll(strings.ToLower(p.Title), " ", "-") }
+				pages = append(pages, pageSpec{id: id, title: p.Title, slug: slug, order: i, prompt: p.Prompt})
+			}
+			hasCustomConfig = true
+		}
+	}
+
+	// 2. Repo's wiki.json
+	if len(pages) == 0 {
+		if raw, err2 := fetchFile("wiki.json"); err2 == nil {
+			var cfg struct {
+				Pages []struct {
+					ID     string `json:"id"`
+					Title  string `json:"title"`
+					Slug   string `json:"slug"`
+					Prompt string `json:"prompt"`
+				} `json:"pages"`
+			}
+			if json.Unmarshal([]byte(raw), &cfg) == nil && len(cfg.Pages) > 0 {
+				for i, p := range cfg.Pages {
+					id := p.ID
+					if id == "" { id = fmt.Sprintf("page-%d", i) }
+					slug := p.Slug
+					if slug == "" { slug = strings.ReplaceAll(strings.ToLower(p.Title), " ", "-") }
+					pages = append(pages, pageSpec{id: id, title: p.Title, slug: slug, order: i, prompt: p.Prompt})
+				}
+				hasCustomConfig = true
+			}
+		}
+	}
+
+	// Custom configs always regenerate all pages
+	if hasCustomConfig {
+		for _, s := range pages { pagesToRegen[s.id] = true }
+	}
+
+	// Detect tech stack (needed for system prompt and default page prompts)
 	stack := detectStack(filteredFiles, fetchFile)
 
 	// Build repo context (cap at ~60k chars total)
@@ -1830,24 +2049,15 @@ func wikiGenerate(c *gin.Context) {
 Generate clear, well-structured markdown documentation. Use headers, code blocks, tables, and Mermaid diagrams where appropriate.
 Always use fenced code blocks with language identifiers. Be specific and accurate based on the actual code provided.`, body.Repo, stackStr)
 
-	// Define wiki pages to generate
-	type pageSpec struct {
-		id     string
-		title  string
-		slug   string
-		order  int
-		prompt string
-	}
-
 	repoShort := body.Repo
-	if idx := strings.Index(repoShort, "/"); idx >= 0 {
-		repoShort = repoShort[idx+1:]
-	}
+	if idx := strings.Index(repoShort, "/"); idx >= 0 { repoShort = repoShort[idx+1:] }
 
-	pages := []pageSpec{
-		{
-			id: "overview", title: "Overview", slug: "overview", order: 0,
-			prompt: fmt.Sprintf(`Write an Overview page for the repository "%s".
+	// 3. Default 5 pages (if no custom config)
+	if len(pages) == 0 {
+		pages = []pageSpec{
+			{
+				id: "overview", title: "Overview", slug: "overview", order: 0,
+				prompt: fmt.Sprintf(`Write an Overview page for the repository "%s".
 Include:
 - What this project does (1-2 paragraph summary)
 - Key features (bullet list)
@@ -1856,10 +2066,10 @@ Include:
 - Any important configuration
 
 Base everything on the actual code provided. Be concise but complete.`, body.Repo, stackStr),
-		},
-		{
-			id: "architecture", title: "Architecture", slug: "architecture", order: 1,
-			prompt: fmt.Sprintf(`Write an Architecture page for "%s".
+			},
+			{
+				id: "architecture", title: "Architecture", slug: "architecture", order: 1,
+				prompt: fmt.Sprintf(`Write an Architecture page for "%s".
 Include:
 - High-level architecture description (2-3 paragraphs)
 - A Mermaid diagram showing the main components and their relationships. Use graph TD or flowchart TD syntax. Example:
@@ -1868,10 +2078,10 @@ Include:
 - Key design decisions and patterns used
 
 Base everything on the actual code. Make the Mermaid diagram reflect the real architecture.`, body.Repo),
-		},
-		{
-			id: "structure", title: "Project Structure", slug: "project-structure", order: 2,
-			prompt: fmt.Sprintf(`Write a Project Structure page for "%s".
+			},
+			{
+				id: "structure", title: "Project Structure", slug: "project-structure", order: 2,
+				prompt: fmt.Sprintf(`Write a Project Structure page for "%s".
 Include:
 - Directory tree (use `+"`"+`tree`+"`"+` style formatting in a code block)
 - Description of each major directory and what it contains
@@ -1879,10 +2089,10 @@ Include:
 - Conventions and patterns used in the codebase
 
 Be specific about the actual files present.`, body.Repo),
-		},
-		{
-			id: "modules", title: "Core Modules", slug: "core-modules", order: 3,
-			prompt: fmt.Sprintf(`Write a Core Modules page for "%s".
+			},
+			{
+				id: "modules", title: "Core Modules", slug: "core-modules", order: 3,
+				prompt: fmt.Sprintf(`Write a Core Modules page for "%s".
 For each major module/package/component in the codebase:
 - Module name as a heading
 - What it does
@@ -1891,10 +2101,10 @@ For each major module/package/component in the codebase:
 - Example usage if applicable
 
 Focus on the most important 4-6 modules. Use code snippets from the actual source where helpful.`, body.Repo),
-		},
-		{
-			id: "dataflow", title: "Data Flow", slug: "data-flow", order: 4,
-			prompt: fmt.Sprintf(`Write a Data Flow page for "%s".
+			},
+			{
+				id: "dataflow", title: "Data Flow", slug: "data-flow", order: 4,
+				prompt: fmt.Sprintf(`Write a Data Flow page for "%s".
 Include:
 - How data enters the system (inputs, API endpoints, user actions)
 - How it's processed and transformed
@@ -1905,7 +2115,8 @@ Include:
 - Error handling and edge cases
 
 Base this on the actual code flows you can see.`, body.Repo),
-		},
+			},
+		}
 	}
 
 	// Generate each page (skipping pages that haven't changed)
@@ -1933,9 +2144,9 @@ Base this on the actual code flows you can see.`, body.Repo),
 	}
 
 	wikiID := uuid.New().String()
-	if existingMeta != nil {
-		wikiID = existingMeta.ID
-	}
+	if existingMeta != nil { wikiID = existingMeta.ID }
+	shareToken := strings.ReplaceAll(uuid.New().String(), "-", "")[:20]
+	if existingMeta != nil && existingMeta.ShareToken != "" { shareToken = existingMeta.ShareToken }
 	meta := WikiMeta{
 		ID:               wikiID,
 		Repo:             body.Repo,
@@ -1947,11 +2158,17 @@ Base this on the actual code flows you can see.`, body.Repo),
 		Stack:            stack,
 		Description:      fmt.Sprintf("%s — %s", repoShort, stackStr),
 		RegeneratedPages: regenPageIDs,
+		ShareToken:       shareToken,
+		HasCustomConfig:  hasCustomConfig,
+		TemplateID:       body.TemplateID,
 	}
 	if err := wc.saveMeta(meta); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save wiki"})
 		return
 	}
+	sharesIdx := loadSharesIndex()
+	sharesIdx[shareToken] = shareEntry{UID: uid, Slug: repoSlug}
+	saveSharesIndex(sharesIdx)
 
 	c.JSON(http.StatusCreated, meta)
 }
@@ -2016,7 +2233,17 @@ func main() {
 		gh.GET("/tree", githubGetTree)
 		gh.GET("/content", githubGetContent)
 
-		// Wiki
+		// Wiki templates
+		wt := api.Group("/wiki-templates", authMiddleware)
+		wt.GET("", listWikiTemplates)
+		wt.POST("", createWikiTemplate)
+		wt.PUT("/:tid", updateWikiTemplate)
+		wt.DELETE("/:tid", deleteWikiTemplate)
+
+		// Wiki (public share endpoints — no auth)
+		api.GET("/wiki/share/:token", wikiShareGet)
+		api.GET("/wiki/share/:token/page/:pageid", wikiSharePage)
+		// Wiki (authenticated)
 		w := api.Group("/wiki", authMiddleware)
 		w.GET("", listWikis)
 		w.POST("/generate", wikiGenerate)
