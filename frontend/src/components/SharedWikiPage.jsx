@@ -11,9 +11,20 @@ function MermaidBlock({ code }) {
   const [error, setError] = useState('')
   useEffect(() => {
     const id = 'mermaid-' + Math.random().toString(36).slice(2)
-    mermaid.render(id, code).then(({ svg }) => setSvg(svg)).catch(e => setError(e.message || 'Diagram error'))
+    mermaid.render(id, code)
+      .then(({ svg }) => setSvg(svg))
+      .catch(() => setError('Invalid diagram syntax'))
+      .finally(() => {
+        document.getElementById(`d${id}`)?.remove()
+        document.getElementById(id)?.remove()
+      })
   }, [code])
-  if (error) return <pre style={{ color: 'var(--danger)', background: 'var(--surface2)', padding: '0.75rem', borderRadius: 6, fontSize: '0.8125rem' }}>Mermaid error: {error}</pre>
+  if (error) return (
+    <div style={{ padding: '0.625rem 0.875rem', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.8125rem', color: 'var(--muted)', fontStyle: 'italic' }}>
+      ⚠ Mermaid diagram could not be rendered
+    </div>
+  )
+  if (!svg) return null
   return <div style={{ overflowX: 'auto', margin: '1rem 0', textAlign: 'center' }} dangerouslySetInnerHTML={{ __html: svg }} />
 }
 
