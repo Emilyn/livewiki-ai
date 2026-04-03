@@ -4,9 +4,10 @@ export default function Toast({ toasts }) {
     <div className="toast-container">
       {toasts.map(t => (
         <div key={t.id} className={`toast ${t.type}`}>
-          {t.type === 'success'
-            ? <span style={{ color: 'var(--success)' }}>✓</span>
-            : <span style={{ color: 'var(--danger)' }}>✕</span>}
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+            background: t.type === 'error' ? 'var(--danger)' : 'var(--success)',
+          }} />
           {t.msg}
         </div>
       ))}

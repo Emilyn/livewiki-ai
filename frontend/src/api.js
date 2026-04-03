@@ -66,3 +66,47 @@ export const getDriveChannelData  = (id, group, name) =>
 export const startDriveAuth = () => {
   window.location.href = `/api/drive/auth?origin=${encodeURIComponent(window.location.origin)}`
 }
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+export const getSettings = () => api.get('/settings').then(r => r.data)
+export const putSettings = (data) => api.put('/settings', data).then(r => r.data)
+
+// ── GitHub ────────────────────────────────────────────────────────────────────
+export const startGitHubAuth  = () => {
+  window.location.href = `/api/github/auth?origin=${encodeURIComponent(window.location.origin)}`
+}
+export const saveGitHubToken  = (token) => api.put('/github/token', { access_token: token })
+export const getGitHubStatus  = () => api.get('/github/status').then(r => r.data)
+export const disconnectGitHub = (login) => api.delete('/github/disconnect', { params: login ? { login } : {} })
+export const listGitHubRepos  = () => api.get('/github/repos').then(r => r.data)
+export const getGitHubTree    = (repo, branch) =>
+  api.get('/github/tree', { params: { repo, branch } }).then(r => r.data)
+export const getGitHubContent = (repo, path, branch) =>
+  api.get('/github/content', { params: { repo, path, branch } }).then(r => r.data)
+export const generateWiki     = (body) => api.post('/wiki/generate', body).then(r => r.data)
+
+// ── Wiki v2 ───────────────────────────────────────────────────────────────────
+export const listWikis      = () => api.get('/wiki').then(r => r.data)
+export const getWiki        = (slug) => api.get(`/wiki/${slug}`).then(r => r.data)
+export const getWikiPage    = (slug, pageId) => api.get(`/wiki/${slug}/page/${pageId}`).then(r => r.data)
+export const generateWikiV2 = (repo, branch, templateId) =>
+  api.post('/wiki/generate', { repo, branch, template_id: templateId || undefined }).then(r => r.data)
+export const deleteWikiV2   = (slug) => api.delete(`/wiki/${slug}`)
+export const wikiChat       = (slug, question, history) =>
+  api.post(`/wiki/${slug}/chat`, { question, history }).then(r => r.data)
+export const getWikiShare     = (token) => api.get(`/wiki/share/${token}`).then(r => r.data)
+export const getWikiSharePage = (token, pageId) =>
+  api.get(`/wiki/share/${token}/page/${pageId}`, { responseType: 'text' }).then(r => r.data)
+
+// ── Wiki templates ────────────────────────────────────────────────────────────
+export const listTemplates   = () => api.get('/wiki-templates').then(r => r.data)
+export const createTemplate  = (data) => api.post('/wiki-templates', data).then(r => r.data)
+export const updateTemplate  = (id, data) => api.put(`/wiki-templates/${id}`, data).then(r => r.data)
+export const deleteTemplate  = (id) => api.delete(`/wiki-templates/${id}`)
+
+// ── Folders ───────────────────────────────────────────────────────────────────
+export const listFolders      = () => api.get('/files/folders').then(r => r.data)
+export const createFolder     = (name) => api.post('/files/folders', { name }).then(r => r.data)
+export const deleteFolder     = (id) => api.delete(`/files/folders/${id}`)
+export const assignFileFolder = (fileId, folderId) =>
+  api.put(`/files/${fileId}/folder`, { folder_id: folderId }).then(r => r.data)

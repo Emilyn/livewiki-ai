@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { getFileInfo, getChannelData, getDriveFileInfo, getDriveChannelData } from '../api'
 import SignalChart from './SignalChart'
 import MarkdownViewer from './MarkdownViewer'
+import JsonViewer from './JsonViewer'
 
 const CHART_COLORS = [
   '#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4',
@@ -9,7 +10,8 @@ const CHART_COLORS = [
 ]
 
 export default function MDFViewer({ file, onToast }) {
-  if (file?.ext === '.md') return <MarkdownViewer file={file} onToast={onToast} />
+  if (file?.ext === '.md')   return <MarkdownViewer file={file} onToast={onToast} />
+  if (file?.ext === '.json') return <JsonViewer file={file} onToast={onToast} />
 
   const [info, setInfo] = useState(null)
   const [loading, setLoading] = useState(false)
