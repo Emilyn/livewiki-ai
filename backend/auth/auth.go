@@ -87,6 +87,21 @@ func (s *Store) FindByID(id string) *User {
 	return nil
 }
 
+func (s *Store) FindByEmail(email string) *User {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	email = strings.ToLower(strings.TrimSpace(email))
+	return s.findByEmail(email)
+}
+
+func (s *Store) ListUsers() []User {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]User, len(s.users))
+	copy(out, s.users)
+	return out
+}
+
 func (s *Store) findByEmail(email string) *User {
 	for i := range s.users {
 		if s.users[i].Email == email {
