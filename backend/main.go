@@ -226,6 +226,149 @@ func findTemplate(uid, id string) *WikiTemplate {
 	return nil
 }
 
+// ── Organizations ─────────────────────────────────────────────────────────────
+type Organization struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	OwnerID    string    `json:"owner_id"`
+	IsPersonal bool      `json:"is_personal"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type OrgMember struct {
+	UserID   string    `json:"user_id"`
+	Role     string    `json:"role"` // "admin" | "user"
+	JoinedAt time.Time `json:"joined_at"`
+}
+
+type OrgInvite struct {
+	ID        string    `json:"id"`
+	OrgID     string    `json:"org_id"`
+	Email     string    `json:"email"`
+	InvitedBy string    `json:"invited_by"`
+	Token     string    `json:"token"`
+	Status    string    `json:"status"` // "pending" | "accepted"
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func orgsBaseDir() string { return filepath.Join(uploadsDir, "orgs") }
+func orgDir(id string) string { return filepath.Join(orgsBaseDir(), id) }
+
+func loadOrg(id string) *Organization {
+	data, err := os.ReadFile(filepath.Join(orgDir(id), "meta.json"))
+	if err != nil { return nil }
+	var o Organization
+	if json.Unmarshal(data, &o) != nil { return nil }
+	return &o
+}
+
+func saveOrg(o Organization) {
+	os.MkdirAll(orgDir(o.ID), 0755)
+	data, _ := json.MarshalIndent(o, "", "  ")
+	os.WriteFile(filepath.Join(orgDir(o.ID), "meta.json"), data, 0644)
+}
+
+func loadOrgMembers(orgID string) []OrgMember {
+	data, err := os.ReadFile(filepath.Join(orgDir(orgID), "members.json"))
+	if err != nil { return []OrgMember{} }
+	var m []OrgMember
+	json.Unmarshal(data, &m)
+	if m == nil { return []OrgMember{} }
+	return m
+}
+
+func saveOrgMembers(orgID string, members []OrgMember) {
+	data, _ := json.MarshalIndent(members, "", "  ")
+	os.WriteFile(filepath.Join(orgDir(orgID), "members.json"), data, 0644)
+}
+
+func loadOrgInvites(orgID string) []OrgInvite {
+	data, err := os.ReadFile(filepath.Join(orgDir(orgID), "invites.json"))
+	if err != nil { return []OrgInvite{} }
+	var inv []OrgInvite
+	json.Unmarshal(data, &inv)
+	if inv == nil { return []OrgInvite{} }
+	return inv
+}
+
+func saveOrgInvites(orgID string, invites []OrgInvite) {
+	data, _ := json.MarshalIndent(invites, "", "  ")
+	os.WriteFile(filepath.Join(orgDir(orgID), "invites.json"), data, 0644)
+}
+
+func listAllOrgs() []Organization {
+	entries, err := os.ReadDir(orgsBaseDir())
+	if err != nil { return nil }
+	var orgs []Organization
+	for _, e := range entries {
+		if !e.IsDir() { continue }
+		if o := loadOrg(e.Name()); o != nil {
+			orgs = append(orgs, *o)
+		}
+	}
+	return orgs
+}
+
+func userOrgs(uid string) []Organization {
+	all := listAllOrgs()
+	var out []Organization
+	for _, o := range all {
+		for _, m := range loadOrgMembers(o.ID) {
+			if m.UserID == uid {
+				out = append(out, o)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func orgMemberRole(orgID, uid string) string {
+	for _, m := range loadOrgMembers(orgID) {
+		if m.UserID == uid { return m.Role }
+	}
+	return ""
+}
+
+func superAdminsFilePath() string { return filepath.Join(uploadsDir, "super_admins.json") }
+
+func loadSuperAdminIDs() []string {
+	data, err := os.ReadFile(superAdminsFilePath())
+	if err != nil { return []string{} }
+	var ids []string
+	json.Unmarshal(data, &ids)
+	if ids == nil { return []string{} }
+	return ids
+}
+
+func saveSuperAdminIDs(ids []string) {
+	data, _ := json.MarshalIndent(ids, "", "  ")
+	os.WriteFile(superAdminsFilePath(), data, 0644)
+}
+
+func isSuperAdmin(user *auth.User) bool {
+	// Check env var (bootstrap)
+	sa := os.Getenv("SUPER_ADMIN_EMAIL")
+	if sa != "" && strings.EqualFold(user.Email, sa) { return true }
+	// Check stored super admin list
+	for _, id := range loadSuperAdminIDs() {
+		if id == user.ID { return true }
+	}
+	return false
+}
+
+func ensurePersonalOrg(uid, name string) {
+	// Check if user already owns a personal org
+	for _, o := range userOrgs(uid) {
+		if o.OwnerID == uid { return }
+	}
+	orgID := uuid.New().String()
+	org := Organization{ID: orgID, Name: name + "'s Workspace", OwnerID: uid, IsPersonal: true, CreatedAt: time.Now()}
+	saveOrg(org)
+	saveOrgMembers(orgID, []OrgMember{{UserID: uid, Role: "admin", JoinedAt: time.Now()}})
+}
+
 func sharesIndexPath() string { return filepath.Join(uploadsDir, "shares.json") }
 
 func loadSharesIndex() map[string]shareEntry {
@@ -610,6 +753,7 @@ func authRegister(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
 	}
+	ensurePersonalOrg(user.ID, user.Name)
 	c.JSON(http.StatusCreated, gin.H{
 		"token": token,
 		"user":  gin.H{"id": user.ID, "email": user.Email, "name": user.Name, "avatar_url": user.AvatarURL},
@@ -635,6 +779,7 @@ func authLogin(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
 	}
+	ensurePersonalOrg(user.ID, user.Name)
 	c.JSON(http.StatusOK, gin.H{
 		"token": token,
 		"user":  gin.H{"id": user.ID, "email": user.Email, "name": user.Name, "avatar_url": user.AvatarURL},
@@ -644,7 +789,8 @@ func authLogin(c *gin.Context) {
 func authMe(c *gin.Context) {
 	user := me(c)
 	c.JSON(http.StatusOK, gin.H{
-		"id": user.ID, "email": user.Email, "name": user.Name, "avatar_url": user.AvatarURL,
+		"id": user.ID, "email": user.Email, "name": user.Name,
+		"avatar_url": user.AvatarURL, "is_super_admin": isSuperAdmin(user),
 	})
 }
 
@@ -695,6 +841,7 @@ func googleAuthCallback(c *gin.Context) {
 		c.Redirect(http.StatusFound, origin+"?auth=error")
 		return
 	}
+	ensurePersonalOrg(user.ID, user.Name)
 	authToken, err := authStore.GenerateToken(user.ID)
 	if err != nil {
 		c.Redirect(http.StatusFound, origin+"?auth=error")
@@ -1874,6 +2021,378 @@ func isDataFlowFile(base, lower string) bool {
 	return false
 }
 
+// ── Org handlers ──────────────────────────────────────────────────────────────
+
+// Helper: enrich member list with user info
+type OrgMemberDetail struct {
+	UserID    string    `json:"user_id"`
+	Role      string    `json:"role"`
+	JoinedAt  time.Time `json:"joined_at"`
+	Name      string    `json:"name"`
+	Email     string    `json:"email"`
+	AvatarURL string    `json:"avatar_url"`
+}
+
+func enrichMembers(members []OrgMember) []OrgMemberDetail {
+	var out []OrgMemberDetail
+	for _, m := range members {
+		d := OrgMemberDetail{UserID: m.UserID, Role: m.Role, JoinedAt: m.JoinedAt}
+		if u := authStore.FindByID(m.UserID); u != nil {
+			d.Name = u.Name
+			d.Email = u.Email
+			d.AvatarURL = u.AvatarURL
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+func listOrgs(c *gin.Context) {
+	uid := me(c).ID
+	orgs := userOrgs(uid)
+	type OrgWithRole struct {
+		Organization
+		Role        string `json:"role"`
+		MemberCount int    `json:"member_count"`
+	}
+	var out []OrgWithRole
+	for _, o := range orgs {
+		members := loadOrgMembers(o.ID)
+		role := ""
+		for _, m := range members {
+			if m.UserID == uid { role = m.Role; break }
+		}
+		out = append(out, OrgWithRole{Organization: o, Role: role, MemberCount: len(members)})
+	}
+	if out == nil { out = []OrgWithRole{} }
+	c.JSON(http.StatusOK, out)
+}
+
+func getOrg(c *gin.Context) {
+	orgID := c.Param("orgid")
+	uid := me(c).ID
+	role := orgMemberRole(orgID, uid)
+	if role == "" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not a member"})
+		return
+	}
+	org := loadOrg(orgID)
+	if org == nil { c.JSON(http.StatusNotFound, gin.H{"error": "org not found"}); return }
+	members := loadOrgMembers(orgID)
+	var invites []OrgInvite
+	if role == "admin" { invites = loadOrgInvites(orgID) }
+	c.JSON(http.StatusOK, gin.H{
+		"org": org, "role": role,
+		"members": enrichMembers(members),
+		"invites": invites,
+	})
+}
+
+func orgInviteUser(c *gin.Context) {
+	orgID := c.Param("orgid")
+	uid := me(c).ID
+	if orgMemberRole(orgID, uid) != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
+		return
+	}
+	org := loadOrg(orgID)
+	if org == nil { c.JSON(http.StatusNotFound, gin.H{"error": "org not found"}); return }
+
+	var body struct{ Email string `json:"email"` }
+	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.Email) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+
+	// Check if already a member
+	members := loadOrgMembers(orgID)
+	if existing := authStore.FindByEmail(email); existing != nil {
+		for _, m := range members {
+			if m.UserID == existing.ID {
+				c.JSON(http.StatusConflict, gin.H{"error": "user is already a member"})
+				return
+			}
+		}
+		// User exists — add directly
+		members = append(members, OrgMember{UserID: existing.ID, Role: "user", JoinedAt: time.Now()})
+		saveOrgMembers(orgID, members)
+		c.JSON(http.StatusOK, gin.H{
+			"status": "added",
+			"user":   gin.H{"id": existing.ID, "name": existing.Name, "email": existing.Email, "avatar_url": existing.AvatarURL},
+		})
+		return
+	}
+
+	// User doesn't exist — create invite
+	invites := loadOrgInvites(orgID)
+	for _, inv := range invites {
+		if inv.Email == email && inv.Status == "pending" && time.Now().Before(inv.ExpiresAt) {
+			c.JSON(http.StatusOK, gin.H{"status": "pending", "token": inv.Token})
+			return
+		}
+	}
+	inviter := me(c)
+	token := strings.ReplaceAll(uuid.New().String(), "-", "")
+	invite := OrgInvite{
+		ID: uuid.New().String(), OrgID: orgID, Email: email,
+		InvitedBy: inviter.Name, Token: token, Status: "pending",
+		CreatedAt: time.Now(), ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+	}
+	invites = append(invites, invite)
+	saveOrgInvites(orgID, invites)
+	c.JSON(http.StatusCreated, gin.H{"status": "invited", "token": token})
+}
+
+func orgRemoveMember(c *gin.Context) {
+	orgID := c.Param("orgid")
+	targetUID := c.Param("uid")
+	uid := me(c).ID
+	role := orgMemberRole(orgID, uid)
+	org := loadOrg(orgID)
+	if org == nil { c.JSON(http.StatusNotFound, gin.H{"error": "org not found"}); return }
+	// Admin can remove, or user can remove themselves
+	if role != "admin" && uid != targetUID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
+		return
+	}
+	// Can't remove the owner
+	if targetUID == org.OwnerID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot remove org owner"})
+		return
+	}
+	members := loadOrgMembers(orgID)
+	var next []OrgMember
+	for _, m := range members {
+		if m.UserID != targetUID { next = append(next, m) }
+	}
+	saveOrgMembers(orgID, next)
+	c.JSON(http.StatusOK, gin.H{"message": "removed"})
+}
+
+func orgChangeMemberRole(c *gin.Context) {
+	orgID := c.Param("orgid")
+	targetUID := c.Param("uid")
+	uid := me(c).ID
+	org := loadOrg(orgID)
+	if org == nil { c.JSON(http.StatusNotFound, gin.H{"error": "org not found"}); return }
+	if orgMemberRole(orgID, uid) != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
+		return
+	}
+	if targetUID == org.OwnerID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot change owner role"})
+		return
+	}
+	var body struct{ Role string `json:"role"` }
+	if err := c.ShouldBindJSON(&body); err != nil || (body.Role != "admin" && body.Role != "user") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "role must be admin or user"})
+		return
+	}
+	members := loadOrgMembers(orgID)
+	for i, m := range members {
+		if m.UserID == targetUID {
+			members[i].Role = body.Role
+			saveOrgMembers(orgID, members)
+			c.JSON(http.StatusOK, gin.H{"message": "updated"})
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "member not found"})
+}
+
+func orgCancelInvite(c *gin.Context) {
+	orgID := c.Param("orgid")
+	inviteID := c.Param("inviteid")
+	uid := me(c).ID
+	if orgMemberRole(orgID, uid) != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin only"})
+		return
+	}
+	invites := loadOrgInvites(orgID)
+	var next []OrgInvite
+	for _, inv := range invites {
+		if inv.ID != inviteID { next = append(next, inv) }
+	}
+	saveOrgInvites(orgID, next)
+	c.JSON(http.StatusOK, gin.H{"message": "cancelled"})
+}
+
+func orgWikis(c *gin.Context) {
+	orgID := c.Param("orgid")
+	uid := me(c).ID
+	if orgMemberRole(orgID, uid) == "" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not a member"})
+		return
+	}
+	members := loadOrgMembers(orgID)
+	type WikiWithOwner struct {
+		WikiMeta
+		OwnerID   string `json:"owner_id"`
+		OwnerName string `json:"owner_name"`
+	}
+	var out []WikiWithOwner
+	for _, m := range members {
+		wikis := listUserWikis(m.UserID)
+		u := authStore.FindByID(m.UserID)
+		ownerName := ""
+		if u != nil { ownerName = u.Name }
+		for _, w := range wikis {
+			out = append(out, WikiWithOwner{WikiMeta: w, OwnerID: m.UserID, OwnerName: ownerName})
+		}
+	}
+	if out == nil { out = []WikiWithOwner{} }
+	c.JSON(http.StatusOK, out)
+}
+
+// Public invite endpoints
+func getInvite(c *gin.Context) {
+	token := c.Param("token")
+	orgs := listAllOrgs()
+	for _, o := range orgs {
+		for _, inv := range loadOrgInvites(o.ID) {
+			if inv.Token == token {
+				if inv.Status != "pending" || time.Now().After(inv.ExpiresAt) {
+					c.JSON(http.StatusGone, gin.H{"error": "invite expired or already used"})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{
+					"org_id":     o.ID,
+					"org_name":   o.Name,
+					"invited_by": inv.InvitedBy,
+					"email":      inv.Email,
+				})
+				return
+			}
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "invite not found"})
+}
+
+func acceptInvite(c *gin.Context) {
+	token := c.Param("token")
+	uid := me(c).ID
+	user := me(c)
+	orgs := listAllOrgs()
+	for _, o := range orgs {
+		invites := loadOrgInvites(o.ID)
+		for i, inv := range invites {
+			if inv.Token != token { continue }
+			if inv.Status != "pending" || time.Now().After(inv.ExpiresAt) {
+				c.JSON(http.StatusGone, gin.H{"error": "invite expired or already used"})
+				return
+			}
+			// Check not already a member
+			if orgMemberRole(o.ID, uid) != "" {
+				invites[i].Status = "accepted"
+				saveOrgInvites(o.ID, invites)
+				c.JSON(http.StatusOK, gin.H{"message": "already a member", "org_id": o.ID, "org_name": o.Name})
+				return
+			}
+			// Verify email matches (if invite was for a specific email)
+			if inv.Email != "" && !strings.EqualFold(inv.Email, user.Email) {
+				c.JSON(http.StatusForbidden, gin.H{"error": "this invite was sent to a different email address"})
+				return
+			}
+			members := loadOrgMembers(o.ID)
+			members = append(members, OrgMember{UserID: uid, Role: "user", JoinedAt: time.Now()})
+			saveOrgMembers(o.ID, members)
+			invites[i].Status = "accepted"
+			saveOrgInvites(o.ID, invites)
+			c.JSON(http.StatusOK, gin.H{"message": "joined", "org_id": o.ID, "org_name": o.Name})
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "invite not found"})
+}
+
+// Super admin handlers
+func superAdminListOrgs(c *gin.Context) {
+	if !isSuperAdmin(me(c)) { c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"}); return }
+	orgs := listAllOrgs()
+	type OrgSummary struct {
+		Organization
+		MemberCount int `json:"member_count"`
+	}
+	var out []OrgSummary
+	for _, o := range orgs {
+		out = append(out, OrgSummary{Organization: o, MemberCount: len(loadOrgMembers(o.ID))})
+	}
+	if out == nil { out = []OrgSummary{} }
+	c.JSON(http.StatusOK, out)
+}
+
+func superAdminListUsers(c *gin.Context) {
+	if !isSuperAdmin(me(c)) { c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"}); return }
+	users := authStore.ListUsers()
+	var out []gin.H
+	for _, u := range users {
+		cp := u
+		out = append(out, gin.H{
+			"id": u.ID, "email": u.Email, "name": u.Name,
+			"avatar_url": u.AvatarURL, "created_at": u.CreatedAt,
+			"is_super_admin": isSuperAdmin(&cp),
+		})
+	}
+	if out == nil { out = []gin.H{} }
+	c.JSON(http.StatusOK, out)
+}
+
+func superAdminPromoteUser(c *gin.Context) {
+	if !isSuperAdmin(me(c)) { c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"}); return }
+	targetUID := c.Param("uid")
+	// Verify user exists
+	if authStore.FindByID(targetUID) == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	ids := loadSuperAdminIDs()
+	for _, id := range ids {
+		if id == targetUID {
+			c.JSON(http.StatusOK, gin.H{"message": "already a super admin"})
+			return
+		}
+	}
+	ids = append(ids, targetUID)
+	saveSuperAdminIDs(ids)
+	c.JSON(http.StatusOK, gin.H{"message": "promoted"})
+}
+
+func superAdminDemoteUser(c *gin.Context) {
+	if !isSuperAdmin(me(c)) { c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"}); return }
+	targetUID := c.Param("uid")
+	// Cannot demote yourself
+	if me(c).ID == targetUID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot demote yourself"})
+		return
+	}
+	// Cannot demote env-var super admin
+	if u := authStore.FindByID(targetUID); u != nil {
+		sa := os.Getenv("SUPER_ADMIN_EMAIL")
+		if sa != "" && strings.EqualFold(u.Email, sa) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot demote the bootstrap super admin"})
+			return
+		}
+	}
+	ids := loadSuperAdminIDs()
+	var next []string
+	for _, id := range ids {
+		if id != targetUID { next = append(next, id) }
+	}
+	saveSuperAdminIDs(next)
+	c.JSON(http.StatusOK, gin.H{"message": "demoted"})
+}
+
+func superAdminDeleteOrg(c *gin.Context) {
+	if !isSuperAdmin(me(c)) { c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"}); return }
+	orgID := c.Param("orgid")
+	if err := os.RemoveAll(orgDir(orgID)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete org"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+}
+
 func wikiGenerate(c *gin.Context) {
 	var body struct {
 		Repo       string `json:"repo"`
@@ -2239,6 +2758,29 @@ func main() {
 		wt.POST("", createWikiTemplate)
 		wt.PUT("/:tid", updateWikiTemplate)
 		wt.DELETE("/:tid", deleteWikiTemplate)
+
+		// Invite (public)
+		api.GET("/invite/:token", getInvite)
+		// Invite accept (requires auth)
+		api.POST("/invite/:token/accept", authMiddleware, acceptInvite)
+
+		// Orgs
+		og := api.Group("/orgs", authMiddleware)
+		og.GET("", listOrgs)
+		og.GET("/:orgid", getOrg)
+		og.GET("/:orgid/wikis", orgWikis)
+		og.POST("/:orgid/invite", orgInviteUser)
+		og.DELETE("/:orgid/members/:uid", orgRemoveMember)
+		og.PUT("/:orgid/members/:uid/role", orgChangeMemberRole)
+		og.DELETE("/:orgid/invites/:inviteid", orgCancelInvite)
+
+		// Super admin
+		sa := api.Group("/superadmin", authMiddleware)
+		sa.GET("/orgs", superAdminListOrgs)
+		sa.GET("/users", superAdminListUsers)
+		sa.DELETE("/orgs/:orgid", superAdminDeleteOrg)
+		sa.POST("/users/:uid/superadmin", superAdminPromoteUser)
+		sa.DELETE("/users/:uid/superadmin", superAdminDemoteUser)
 
 		// Wiki (public share endpoints — no auth)
 		api.GET("/wiki/share/:token", wikiShareGet)

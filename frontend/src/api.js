@@ -104,6 +104,24 @@ export const createTemplate  = (data) => api.post('/wiki-templates', data).then(
 export const updateTemplate  = (id, data) => api.put(`/wiki-templates/${id}`, data).then(r => r.data)
 export const deleteTemplate  = (id) => api.delete(`/wiki-templates/${id}`)
 
+// ── Organizations ─────────────────────────────────────────────────────────────
+export const listOrgs             = () => api.get('/orgs').then(r => r.data)
+export const getOrg               = (orgId) => api.get(`/orgs/${orgId}`).then(r => r.data)
+export const inviteToOrg          = (orgId, email) => api.post(`/orgs/${orgId}/invite`, { email }).then(r => r.data)
+export const removeOrgMember      = (orgId, uid) => api.delete(`/orgs/${orgId}/members/${uid}`)
+export const changeOrgMemberRole  = (orgId, uid, role) => api.put(`/orgs/${orgId}/members/${uid}/role`, { role }).then(r => r.data)
+export const cancelOrgInvite      = (orgId, inviteId) => api.delete(`/orgs/${orgId}/invites/${inviteId}`)
+export const getOrgWikis          = (orgId) => api.get(`/orgs/${orgId}/wikis`).then(r => r.data)
+export const getInviteInfo        = (token) => api.get(`/invite/${token}`).then(r => r.data)
+export const acceptInvite         = (token) => api.post(`/invite/${token}/accept`).then(r => r.data)
+
+// ── Super Admin ───────────────────────────────────────────────────────────────
+export const superAdminListOrgs   = () => api.get('/superadmin/orgs').then(r => r.data)
+export const superAdminListUsers  = () => api.get('/superadmin/users').then(r => r.data)
+export const superAdminDeleteOrg  = (orgId) => api.delete(`/superadmin/orgs/${orgId}`)
+export const superAdminPromote    = (uid) => api.post(`/superadmin/users/${uid}/superadmin`).then(r => r.data)
+export const superAdminDemote     = (uid) => api.delete(`/superadmin/users/${uid}/superadmin`).then(r => r.data)
+
 // ── Folders ───────────────────────────────────────────────────────────────────
 export const listFolders      = () => api.get('/files/folders').then(r => r.data)
 export const createFolder     = (name) => api.post('/files/folders', { name }).then(r => r.data)
