@@ -8,10 +8,9 @@ RUN npm run build
 
 # ── Stage 2: build the Go binary ─────────────────────────────────────────────
 FROM golang:1.24-alpine AS backend
-ENV GOTOOLCHAIN=auto
 WORKDIR /app
 COPY backend/go.mod backend/go.sum ./
-RUN go mod download
+RUN GOTOOLCHAIN=auto go mod download
 COPY backend/ ./
 # Embed the compiled frontend into the Go image so a single binary is deployed
 COPY --from=frontend /app/frontend/dist ./static
