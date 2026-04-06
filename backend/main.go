@@ -31,6 +31,8 @@ var authStore *auth.Store
 var googleAuthConf *oauth2.Config
 var githubOAuthConf *oauth2.Config
 var githubRedirectURI string
+var gitlabOAuthConf *oauth2.Config
+var gitlabRedirectURI string
 
 func init() {
 	uploadsDir = os.Getenv("UPLOADS_DIR")
@@ -77,6 +79,30 @@ func init() {
 			Endpoint: oauth2.Endpoint{
 				AuthURL:  "https://github.com/login/oauth/authorize",
 				TokenURL: "https://github.com/login/oauth/access_token",
+			},
+		}
+	}
+
+	// GitLab OAuth
+	gitlabClientID := os.Getenv("GITLAB_CLIENT_ID")
+	gitlabClientSecret := os.Getenv("GITLAB_CLIENT_SECRET")
+	gitlabRedirectURI = os.Getenv("GITLAB_REDIRECT_URI")
+	if gitlabRedirectURI == "" {
+		if domain := os.Getenv("RAILWAY_PUBLIC_DOMAIN"); domain != "" {
+			gitlabRedirectURI = "https://" + domain + "/api/gitlab/callback"
+		} else {
+			gitlabRedirectURI = "http://localhost:8080/api/gitlab/callback"
+		}
+	}
+	if gitlabClientID != "" && gitlabClientSecret != "" {
+		gitlabOAuthConf = &oauth2.Config{
+			ClientID:     gitlabClientID,
+			ClientSecret: gitlabClientSecret,
+			RedirectURL:  gitlabRedirectURI,
+			Scopes:       []string{"read_api"},
+			Endpoint: oauth2.Endpoint{
+				AuthURL:  "https://gitlab.com/oauth/authorize",
+				TokenURL: "https://gitlab.com/oauth/token",
 			},
 		}
 	}
@@ -174,6 +200,7 @@ type WikiMeta struct {
 	ShareToken       string         `json:"share_token,omitempty"`
 	HasCustomConfig  bool           `json:"has_custom_config,omitempty"`
 	TemplateID       string         `json:"template_id,omitempty"`
+	Source           string         `json:"source,omitempty"` // "github" | "gitlab"
 }
 
 // ── Shares index (token → uid+slug, no auth required for reads) ───────────────
@@ -478,11 +505,13 @@ type RepoFile struct {
 	Size int
 }
 
-func filterRepoFiles(tree []struct {
+type treeEntry struct {
 	Path string `json:"path"`
 	Type string `json:"type"`
 	Size int    `json:"size"`
-}) []RepoFile {
+}
+
+func filterRepoFiles(tree []treeEntry) []RepoFile {
 	var result []RepoFile
 	seen := map[string]bool{}
 
@@ -1645,6 +1674,320 @@ func githubGetContent(c *gin.Context) {
 	c.Data(http.StatusOK, "text/plain; charset=utf-8", decoded)
 }
 
+// ── GitLab handlers ───────────────────────────────────────────────────────────
+
+type GitLabAccount struct {
+	Username string `json:"username"`
+	Token    string `json:"token"`
+}
+
+func gitlabAccountsPath(uid string) string {
+	return filepath.Join(userDir(uid), "gitlab_accounts.json")
+}
+
+func loadGitLabAccounts(uid string) []GitLabAccount {
+	data, err := os.ReadFile(gitlabAccountsPath(uid))
+	if err != nil {
+		return nil
+	}
+	var accounts []GitLabAccount
+	json.Unmarshal(data, &accounts)
+	return accounts
+}
+
+func saveGitLabAccounts(uid string, accounts []GitLabAccount) error {
+	data, _ := json.MarshalIndent(accounts, "", "  ")
+	return os.WriteFile(gitlabAccountsPath(uid), data, 0600)
+}
+
+func gitlabTokenForUser(uid string) string {
+	accounts := loadGitLabAccounts(uid)
+	if len(accounts) == 0 {
+		return ""
+	}
+	return accounts[0].Token
+}
+
+func doGitLabRequest(ctx interface{ Done() <-chan struct{} }, token, method, apiURL string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequest(method, apiURL, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return http.DefaultClient.Do(req)
+}
+
+func gitlabAuthStart(c *gin.Context) {
+	if gitlabOAuthConf == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "GitLab auth not configured"})
+		return
+	}
+	origin := c.DefaultQuery("origin", "http://localhost:5173")
+	c.Redirect(http.StatusFound, gitlabOAuthConf.AuthCodeURL(origin, oauth2.AccessTypeOnline))
+}
+
+func gitlabAuthCallback(c *gin.Context) {
+	if gitlabOAuthConf == nil {
+		c.String(http.StatusServiceUnavailable, "GitLab auth not configured")
+		return
+	}
+	code := c.Query("code")
+	origin := c.DefaultQuery("state", "http://localhost:5173")
+	if code == "" {
+		c.Redirect(http.StatusFound, origin+"?gitlab=error")
+		return
+	}
+	token, err := gitlabOAuthConf.Exchange(c.Request.Context(), code)
+	if err != nil {
+		log.Printf("gitlab auth exchange: %v", err)
+		c.Redirect(http.StatusFound, origin+"?gitlab=error")
+		return
+	}
+	c.Redirect(http.StatusFound, origin+"?gitlab_token="+url.QueryEscape(token.AccessToken))
+}
+
+func gitlabSaveToken(c *gin.Context) {
+	var body struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.AccessToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "access_token required"})
+		return
+	}
+	uid := me(c).ID
+	os.MkdirAll(userDir(uid), 0755)
+
+	resp, err := doGitLabRequest(c.Request.Context(), body.AccessToken, "GET", "https://gitlab.com/api/v4/user", nil)
+	if err != nil || resp.StatusCode != 200 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "could not verify GitLab token"})
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return
+	}
+	defer resp.Body.Close()
+	var profile struct {
+		Username string `json:"username"`
+	}
+	json.NewDecoder(resp.Body).Decode(&profile)
+
+	accounts := loadGitLabAccounts(uid)
+	found := false
+	for i, a := range accounts {
+		if a.Username == profile.Username {
+			accounts[i].Token = body.AccessToken
+			found = true
+			break
+		}
+	}
+	if !found {
+		accounts = append(accounts, GitLabAccount{Username: profile.Username, Token: body.AccessToken})
+	}
+	if err := saveGitLabAccounts(uid, accounts); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save token"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"username": profile.Username})
+}
+
+func gitlabStatus(c *gin.Context) {
+	accounts := loadGitLabAccounts(me(c).ID)
+	usernames := make([]string, 0, len(accounts))
+	for _, a := range accounts {
+		usernames = append(usernames, a.Username)
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"connected":  len(accounts) > 0,
+		"configured": gitlabOAuthConf != nil,
+		"accounts":   usernames,
+	})
+}
+
+func gitlabDisconnect(c *gin.Context) {
+	uid := me(c).ID
+	username := c.Query("username")
+	if username == "" {
+		os.Remove(gitlabAccountsPath(uid))
+		c.JSON(http.StatusOK, gin.H{"message": "disconnected"})
+		return
+	}
+	accounts := loadGitLabAccounts(uid)
+	filtered := accounts[:0]
+	for _, a := range accounts {
+		if a.Username != username {
+			filtered = append(filtered, a)
+		}
+	}
+	saveGitLabAccounts(uid, filtered)
+	c.JSON(http.StatusOK, gin.H{"message": "disconnected"})
+}
+
+func gitlabListRepos(c *gin.Context) {
+	uid := me(c).ID
+	accounts := loadGitLabAccounts(uid)
+	if len(accounts) == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "not connected to GitLab"})
+		return
+	}
+
+	type RepoInfo struct {
+		ID            int    `json:"id"`
+		FullName      string `json:"full_name"`
+		DefaultBranch string `json:"default_branch"`
+		Private       bool   `json:"private"`
+		Description   string `json:"description"`
+		Account       string `json:"account"`
+		Source        string `json:"source"`
+	}
+
+	seen := map[int]bool{}
+	out := make([]RepoInfo, 0)
+
+	for _, acct := range accounts {
+		page := 1
+		for {
+			apiURL := fmt.Sprintf("https://gitlab.com/api/v4/projects?membership=true&per_page=100&order_by=last_activity_at&sort=desc&page=%d", page)
+			resp, err := doGitLabRequest(c.Request.Context(), acct.Token, "GET", apiURL, nil)
+			if err != nil {
+				break
+			}
+			var projects []map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&projects)
+			resp.Body.Close()
+			if len(projects) == 0 {
+				break
+			}
+			for _, p := range projects {
+				ri := RepoInfo{Account: acct.Username, Source: "gitlab"}
+				if v, ok := p["id"].(float64); ok {
+					ri.ID = int(v)
+				}
+				if seen[ri.ID] {
+					continue
+				}
+				seen[ri.ID] = true
+				if v, ok := p["path_with_namespace"].(string); ok {
+					ri.FullName = v
+				}
+				if v, ok := p["default_branch"].(string); ok {
+					ri.DefaultBranch = v
+				}
+				if v, ok := p["visibility"].(string); ok {
+					ri.Private = v == "private"
+				}
+				if v, ok := p["description"].(string); ok {
+					ri.Description = v
+				}
+				out = append(out, ri)
+			}
+			if len(projects) < 100 {
+				break
+			}
+			page++
+		}
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func gitlabGetTree(c *gin.Context) {
+	uid := me(c).ID
+	repo := c.Query("repo")
+	branch := c.DefaultQuery("branch", "main")
+	if repo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "repo required"})
+		return
+	}
+	token := gitlabTokenForUser(uid)
+	if token == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "not connected to GitLab"})
+		return
+	}
+	encodedRepo := url.PathEscape(repo)
+	var allItems []treeEntry
+	page := 1
+	for {
+		apiURL := fmt.Sprintf("https://gitlab.com/api/v4/projects/%s/repository/tree?recursive=true&ref=%s&per_page=100&page=%d", encodedRepo, url.QueryEscape(branch), page)
+		resp, err := doGitLabRequest(c.Request.Context(), token, "GET", apiURL, nil)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		var items []treeEntry
+		json.NewDecoder(resp.Body).Decode(&items)
+		resp.Body.Close()
+		allItems = append(allItems, items...)
+		if len(items) < 100 {
+			break
+		}
+		page++
+	}
+	c.JSON(http.StatusOK, allItems)
+}
+
+func gitlabGetContent(c *gin.Context) {
+	uid := me(c).ID
+	repo := c.Query("repo")
+	path := c.Query("path")
+	branch := c.DefaultQuery("branch", "main")
+	if repo == "" || path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "repo and path required"})
+		return
+	}
+	token := gitlabTokenForUser(uid)
+	if token == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "not connected to GitLab"})
+		return
+	}
+	encodedRepo := url.PathEscape(repo)
+	encodedPath := url.PathEscape(path)
+	apiURL := fmt.Sprintf("https://gitlab.com/api/v4/projects/%s/repository/files/%s/raw?ref=%s", encodedRepo, encodedPath, url.QueryEscape(branch))
+	resp, err := doGitLabRequest(c.Request.Context(), token, "GET", apiURL, nil)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read content"})
+		return
+	}
+	c.Data(http.StatusOK, "text/plain; charset=utf-8", data)
+}
+
+// fetchChangedFilesGitLab calls GitLab compare API and returns changed file paths.
+func fetchChangedFilesGitLab(ctx interface{ Done() <-chan struct{} }, token, repo, baseSHA, headSHA string) []string {
+	encodedRepo := url.PathEscape(repo)
+	compareURL := fmt.Sprintf("https://gitlab.com/api/v4/projects/%s/repository/compare?from=%s&to=%s", encodedRepo, baseSHA, headSHA)
+	resp, err := doGitLabRequest(ctx, token, "GET", compareURL, nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return nil
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Diffs []struct {
+			NewPath string `json:"new_path"`
+		} `json:"diffs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil
+	}
+	if len(result.Diffs) >= 1000 {
+		return nil
+	}
+	out := make([]string, len(result.Diffs))
+	for i, d := range result.Diffs {
+		out[i] = d.NewPath
+	}
+	return out
+}
+
 // callAIWithHistory calls the configured AI provider with a full message history.
 func callAIWithHistory(settings UserSettings, systemPrompt string, messages []map[string]string) (string, error) {
 	if settings.AIProvider == "openai" {
@@ -2398,12 +2741,14 @@ func wikiGenerate(c *gin.Context) {
 		Repo       string `json:"repo"`
 		Branch     string `json:"branch"`
 		TemplateID string `json:"template_id"`
+		Source     string `json:"source"` // "github" | "gitlab"
 	}
 	if err := c.ShouldBindJSON(&body); err != nil || body.Repo == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "repo is required"})
 		return
 	}
 	if body.Branch == "" { body.Branch = "main" }
+	if body.Source == "" { body.Source = "github" }
 
 	uid := me(c).ID
 	settings := loadSettings(uid)
@@ -2416,41 +2761,75 @@ func wikiGenerate(c *gin.Context) {
 		return
 	}
 
-	token := githubTokenForRepo(uid, body.Repo)
-	if token == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "not connected to GitHub"})
-		return
+	// Get source-specific token
+	var token string
+	if body.Source == "gitlab" {
+		token = gitlabTokenForUser(uid)
+		if token == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "not connected to GitLab"})
+			return
+		}
+	} else {
+		token = githubTokenForRepo(uid, body.Repo)
+		if token == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "not connected to GitHub"})
+			return
+		}
 	}
 
-	// Fetch repo tree
-	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/git/trees/%s?recursive=1", body.Repo, body.Branch)
-	resp, err := doGitHubRequest(c.Request.Context(), token, "GET", apiURL, nil)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch repo tree"})
-		return
-	}
-	var treeResult struct {
-		Tree []struct {
-			Path string `json:"path"`
-			Type string `json:"type"`
-			Size int    `json:"size"`
-		} `json:"tree"`
-	}
-	json.NewDecoder(resp.Body).Decode(&treeResult)
-	resp.Body.Close()
-
-	// Get commit SHA for staleness detection
+	// Fetch repo tree and commit SHA
+	var treeItems []treeEntry
 	commitSHA := ""
-	branchURL := fmt.Sprintf("https://api.github.com/repos/%s/branches/%s", body.Repo, body.Branch)
-	if br, err2 := doGitHubRequest(c.Request.Context(), token, "GET", branchURL, nil); err2 == nil {
-		var branchInfo struct{ Commit struct{ SHA string `json:"sha"` } `json:"commit"` }
-		json.NewDecoder(br.Body).Decode(&branchInfo)
-		br.Body.Close()
-		commitSHA = branchInfo.Commit.SHA
+
+	if body.Source == "gitlab" {
+		encodedRepo := url.PathEscape(body.Repo)
+		page := 1
+		for {
+			apiURL := fmt.Sprintf("https://gitlab.com/api/v4/projects/%s/repository/tree?recursive=true&ref=%s&per_page=100&page=%d", encodedRepo, url.QueryEscape(body.Branch), page)
+			resp, err := doGitLabRequest(c.Request.Context(), token, "GET", apiURL, nil)
+			if err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch repo tree"})
+				return
+			}
+			var items []treeEntry
+			json.NewDecoder(resp.Body).Decode(&items)
+			resp.Body.Close()
+			treeItems = append(treeItems, items...)
+			if len(items) < 100 { break }
+			page++
+		}
+		branchURL := fmt.Sprintf("https://gitlab.com/api/v4/projects/%s/repository/branches/%s", encodedRepo, url.PathEscape(body.Branch))
+		if br, err2 := doGitLabRequest(c.Request.Context(), token, "GET", branchURL, nil); err2 == nil {
+			var branchInfo struct{ Commit struct{ ID string `json:"id"` } `json:"commit"` }
+			json.NewDecoder(br.Body).Decode(&branchInfo)
+			br.Body.Close()
+			commitSHA = branchInfo.Commit.ID
+		}
+	} else {
+		apiURL := fmt.Sprintf("https://api.github.com/repos/%s/git/trees/%s?recursive=1", body.Repo, body.Branch)
+		resp, err := doGitHubRequest(c.Request.Context(), token, "GET", apiURL, nil)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch repo tree"})
+			return
+		}
+		var treeResult struct {
+			Tree []treeEntry `json:"tree"`
+		}
+		json.NewDecoder(resp.Body).Decode(&treeResult)
+		resp.Body.Close()
+		treeItems = treeResult.Tree
+		branchURL := fmt.Sprintf("https://api.github.com/repos/%s/branches/%s", body.Repo, body.Branch)
+		if br, err2 := doGitHubRequest(c.Request.Context(), token, "GET", branchURL, nil); err2 == nil {
+			var branchInfo struct{ Commit struct{ SHA string `json:"sha"` } `json:"commit"` }
+			json.NewDecoder(br.Body).Decode(&branchInfo)
+			br.Body.Close()
+			commitSHA = branchInfo.Commit.SHA
+		}
 	}
 
 	// Load existing wiki for incremental regeneration
 	repoSlug := repoToSlug(body.Repo)
+	if body.Source == "gitlab" { repoSlug = "gl-" + repoSlug }
 	wc := newWikiCtx(uid, repoSlug)
 	existingMeta := wc.loadMeta()
 
@@ -2467,31 +2846,52 @@ func wikiGenerate(c *gin.Context) {
 		"modules": true, "dataflow": true,
 	}
 	if existingMeta != nil && existingMeta.CommitSHA != "" && commitSHA != "" {
-		changed := fetchChangedFiles(c.Request.Context(), token, body.Repo, existingMeta.CommitSHA, commitSHA)
+		var changed []string
+		if body.Source == "gitlab" {
+			changed = fetchChangedFilesGitLab(c.Request.Context(), token, body.Repo, existingMeta.CommitSHA, commitSHA)
+		} else {
+			changed = fetchChangedFiles(c.Request.Context(), token, body.Repo, existingMeta.CommitSHA, commitSHA)
+		}
 		if changed != nil {
 			pagesToRegen = pagesForChangedFiles(changed)
 		}
 	}
 
 	// Filter files
-	filteredFiles := filterRepoFiles(treeResult.Tree)
+	filteredFiles := filterRepoFiles(treeItems)
 
 	// Helper to fetch file content
-	fetchFile := func(path string) (string, error) {
-		u := fmt.Sprintf("https://api.github.com/repos/%s/contents/%s?ref=%s", body.Repo, path, body.Branch)
-		r, err := doGitHubRequest(c.Request.Context(), token, "GET", u, nil)
-		if err != nil { return "", err }
-		defer r.Body.Close()
-		var result struct {
-			Content  string `json:"content"`
-			Encoding string `json:"encoding"`
+	var fetchFile func(path string) (string, error)
+	if body.Source == "gitlab" {
+		encodedRepo := url.PathEscape(body.Repo)
+		fetchFile = func(path string) (string, error) {
+			encodedPath := url.PathEscape(path)
+			u := fmt.Sprintf("https://gitlab.com/api/v4/projects/%s/repository/files/%s/raw?ref=%s", encodedRepo, encodedPath, url.QueryEscape(body.Branch))
+			r, err := doGitLabRequest(c.Request.Context(), token, "GET", u, nil)
+			if err != nil { return "", err }
+			defer r.Body.Close()
+			if r.StatusCode != 200 { return "", fmt.Errorf("status %d", r.StatusCode) }
+			data, err := io.ReadAll(r.Body)
+			if err != nil { return "", err }
+			return string(data), nil
 		}
-		json.NewDecoder(r.Body).Decode(&result)
-		if result.Encoding != "base64" { return "", fmt.Errorf("unexpected encoding") }
-		cleaned := strings.ReplaceAll(result.Content, "\n", "")
-		decoded, err := base64.StdEncoding.DecodeString(cleaned)
-		if err != nil { return "", err }
-		return string(decoded), nil
+	} else {
+		fetchFile = func(path string) (string, error) {
+			u := fmt.Sprintf("https://api.github.com/repos/%s/contents/%s?ref=%s", body.Repo, path, body.Branch)
+			r, err := doGitHubRequest(c.Request.Context(), token, "GET", u, nil)
+			if err != nil { return "", err }
+			defer r.Body.Close()
+			var result struct {
+				Content  string `json:"content"`
+				Encoding string `json:"encoding"`
+			}
+			json.NewDecoder(r.Body).Decode(&result)
+			if result.Encoding != "base64" { return "", fmt.Errorf("unexpected encoding") }
+			cleaned := strings.ReplaceAll(result.Content, "\n", "")
+			decoded, err := base64.StdEncoding.DecodeString(cleaned)
+			if err != nil { return "", err }
+			return string(decoded), nil
+		}
 	}
 
 	// ── Determine page specs: user template > wiki.json > defaults ────────────
@@ -2680,6 +3080,7 @@ Base this on the actual code flows you can see.`, body.Repo),
 		ShareToken:       shareToken,
 		HasCustomConfig:  hasCustomConfig,
 		TemplateID:       body.TemplateID,
+		Source:           body.Source,
 	}
 	if err := wc.saveMeta(meta); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save wiki"})
@@ -2753,6 +3154,17 @@ func main() {
 		gh.GET("/repos", githubListRepos)
 		gh.GET("/tree", githubGetTree)
 		gh.GET("/content", githubGetContent)
+
+		// GitLab OAuth
+		api.GET("/gitlab/auth", gitlabAuthStart)
+		api.GET("/gitlab/callback", gitlabAuthCallback)
+		gl := api.Group("/gitlab", authMiddleware)
+		gl.GET("/status", gitlabStatus)
+		gl.PUT("/token", gitlabSaveToken)
+		gl.DELETE("/disconnect", gitlabDisconnect)
+		gl.GET("/repos", gitlabListRepos)
+		gl.GET("/tree", gitlabGetTree)
+		gl.GET("/content", gitlabGetContent)
 
 		// Wiki templates
 		wt := api.Group("/wiki-templates", authMiddleware)

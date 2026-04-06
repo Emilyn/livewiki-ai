@@ -9,7 +9,7 @@ import SharedWikiPage from './components/SharedWikiPage'
 import OrgPage from './components/OrgPage'
 import SuperAdminPage from './components/SuperAdminPage'
 import InviteAcceptPage from './components/InviteAcceptPage'
-import { authMe, saveGitHubToken } from './api'
+import { authMe, saveGitHubToken, saveGitLabToken } from './api'
 
 // Special routes — bypass auth shell
 const shareMatch  = window.location.pathname.match(/^\/share\/([^/]+)/)
@@ -120,6 +120,13 @@ export default function App() {
       window.history.replaceState({}, '', '/')
       if (localStorage.getItem('mdf_token')) {
         saveGitHubToken(ghToken).then(() => setTab('wiki')).catch(() => {})
+      }
+    }
+    const glToken = params.get('gitlab_token')
+    if (glToken) {
+      window.history.replaceState({}, '', '/')
+      if (localStorage.getItem('mdf_token')) {
+        saveGitLabToken(glToken).then(() => setTab('wiki')).catch(() => {})
       }
     }
     if (localStorage.getItem('mdf_token')) {

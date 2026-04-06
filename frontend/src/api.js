@@ -85,12 +85,25 @@ export const getGitHubContent = (repo, path, branch) =>
   api.get('/github/content', { params: { repo, path, branch } }).then(r => r.data)
 export const generateWiki     = (body) => api.post('/wiki/generate', body).then(r => r.data)
 
+// ── GitLab ────────────────────────────────────────────────────────────────────
+export const startGitLabAuth  = () => {
+  window.location.href = `/api/gitlab/auth?origin=${encodeURIComponent(window.location.origin)}`
+}
+export const saveGitLabToken  = (token) => api.put('/gitlab/token', { access_token: token })
+export const getGitLabStatus  = () => api.get('/gitlab/status').then(r => r.data)
+export const disconnectGitLab = (username) => api.delete('/gitlab/disconnect', { params: username ? { username } : {} })
+export const listGitLabRepos  = () => api.get('/gitlab/repos').then(r => r.data)
+export const getGitLabTree    = (repo, branch) =>
+  api.get('/gitlab/tree', { params: { repo, branch } }).then(r => r.data)
+export const getGitLabContent = (repo, path, branch) =>
+  api.get('/gitlab/content', { params: { repo, path, branch } }).then(r => r.data)
+
 // ── Wiki v2 ───────────────────────────────────────────────────────────────────
 export const listWikis      = () => api.get('/wiki').then(r => r.data)
 export const getWiki        = (slug) => api.get(`/wiki/${slug}`).then(r => r.data)
 export const getWikiPage    = (slug, pageId) => api.get(`/wiki/${slug}/page/${pageId}`).then(r => r.data)
-export const generateWikiV2 = (repo, branch, templateId) =>
-  api.post('/wiki/generate', { repo, branch, template_id: templateId || undefined }).then(r => r.data)
+export const generateWikiV2 = (repo, branch, templateId, source) =>
+  api.post('/wiki/generate', { repo, branch, template_id: templateId || undefined, source: source || 'github' }).then(r => r.data)
 export const deleteWikiV2   = (slug) => api.delete(`/wiki/${slug}`)
 export const wikiChat       = (slug, question, history) =>
   api.post(`/wiki/${slug}/chat`, { question, history }).then(r => r.data)

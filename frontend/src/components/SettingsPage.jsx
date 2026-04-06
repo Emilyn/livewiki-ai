@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   getSettings, putSettings,
   getGitHubStatus, disconnectGitHub, startGitHubAuth,
+  getGitLabStatus, disconnectGitLab, startGitLabAuth,
   listTemplates, createTemplate, updateTemplate, deleteTemplate,
 } from '../api'
 
@@ -22,6 +23,13 @@ function GitHubMark({ size = 16 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
       <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+    </svg>
+  )
+}
+function GitLabIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 01-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 014.82 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0118.6 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.51L23 13.45a.84.84 0 01-.35.94z"/>
     </svg>
   )
 }
@@ -80,6 +88,8 @@ export default function SettingsPage({ onToast }) {
   const [loading, setLoading]     = useState(true)
   const [ghStatus, setGhStatus]   = useState(null)
   const [ghLoading, setGhLoading] = useState(true)
+  const [glStatus, setGlStatus]   = useState(null)
+  const [glLoading, setGlLoading] = useState(true)
   const [templates, setTemplates]     = useState([])
   const [editingTpl, setEditingTpl]   = useState(null)  // null | 'new' | template object
   const [tplDraft, setTplDraft]       = useState('')     // JSON string being edited
@@ -101,6 +111,10 @@ export default function SettingsPage({ onToast }) {
       .then(setGhStatus)
       .catch(() => setGhStatus({ connected: false, configured: false, accounts: [] }))
       .finally(() => setGhLoading(false))
+    getGitLabStatus()
+      .then(setGlStatus)
+      .catch(() => setGlStatus({ connected: false, configured: false, accounts: [] }))
+      .finally(() => setGlLoading(false))
     listTemplates().then(setTemplates).catch(() => {})
   }, [])
 
@@ -205,13 +219,24 @@ export default function SettingsPage({ onToast }) {
     } catch { onToast('Disconnect failed', 'error') }
   }
 
+  const handleGlDisconnect = async (username) => {
+    try {
+      await disconnectGitLab(username)
+      onToast(username ? `Disconnected @${username}` : 'Disconnected GitLab')
+      getGitLabStatus().then(setGlStatus).catch(() => {})
+    } catch { onToast('Disconnect failed', 'error') }
+  }
 
   if (loading) return <div className="loading-overlay"><span className="spinner" /></div>
 
   const ghAccounts = ghStatus?.accounts || []
+  const glAccounts = glStatus?.accounts || []
 
   return (
-    <div style={{ maxWidth: 600, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+    <div style={{ maxWidth: 1100, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+
+      {/* Two-column grid on large screens */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '1.25rem', alignItems: 'start' }}>
 
       {/* AI Provider */}
       <SectionCard
@@ -276,42 +301,85 @@ export default function SettingsPage({ onToast }) {
         </div>
       </SectionCard>
 
-      {/* GitHub */}
-      <SectionCard
-        icon={<GitHubMark size={16} />}
-        title="GitHub"
-        subtitle="Connect to use the Living Wiki feature"
-        action={ghStatus?.configured && ghStatus?.connected && (
-          <button className="btn-add" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', flexShrink: 0 }} onClick={startGitHubAuth}>+ Add account</button>
-        )}
-      >
-        {ghLoading ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.875rem' }}>
-            <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Loading…
-          </div>
-        ) : !ghStatus?.configured ? (
-          <div className="auth-error">
-            GitHub OAuth is not configured. Add <code>GITHUB_CLIENT_ID</code> and <code>GITHUB_CLIENT_SECRET</code> env vars and redeploy.
-          </div>
-        ) : !ghStatus?.connected ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-            <p style={{ color: 'var(--muted)', fontSize: '0.875rem', margin: 0 }}>No accounts connected. Connect GitHub to browse repos and generate wiki docs.</p>
-            <button className="btn-primary" style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={startGitHubAuth}>
-              <GitHubMark size={14} /> Connect GitHub
-            </button>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            {ghAccounts.map(login => (
-              <div key={login} style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', padding: '0.5rem 0.75rem', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                <GitHubMark size={14} />
-                <span style={{ flex: 1, fontSize: '0.875rem', fontWeight: 500 }}>@{login}</span>
-                <button className="btn-danger-sm" onClick={() => handleGhDisconnect(login)}>Disconnect</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </SectionCard>
+      {/* Right column: GitHub + GitLab */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+
+        {/* GitHub */}
+        <SectionCard
+          icon={<GitHubMark size={16} />}
+          title="GitHub"
+          subtitle="Connect to use the Living Wiki feature"
+          action={ghStatus?.configured && ghStatus?.connected && (
+            <button className="btn-add" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', flexShrink: 0 }} onClick={startGitHubAuth}>+ Add account</button>
+          )}
+        >
+          {ghLoading ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.875rem' }}>
+              <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Loading…
+            </div>
+          ) : !ghStatus?.configured ? (
+            <div className="auth-error">
+              GitHub OAuth is not configured. Add <code>GITHUB_CLIENT_ID</code> and <code>GITHUB_CLIENT_SECRET</code> env vars and redeploy.
+            </div>
+          ) : !ghStatus?.connected ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+              <p style={{ color: 'var(--muted)', fontSize: '0.875rem', margin: 0 }}>No accounts connected. Connect GitHub to browse repos and generate wiki docs.</p>
+              <button className="btn-primary" style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={startGitHubAuth}>
+                <GitHubMark size={14} /> Connect GitHub
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+              {ghAccounts.map(login => (
+                <div key={login} style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', padding: '0.5rem 0.75rem', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <GitHubMark size={14} />
+                  <span style={{ flex: 1, fontSize: '0.875rem', fontWeight: 500 }}>@{login}</span>
+                  <button className="btn-danger-sm" onClick={() => handleGhDisconnect(login)}>Disconnect</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+
+        {/* GitLab */}
+        <SectionCard
+          icon={<GitLabIcon size={16} />}
+          title="GitLab"
+          subtitle="Connect to use the Living Wiki feature with GitLab repositories"
+          action={glStatus?.configured && glStatus?.connected && (
+            <button className="btn-add" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', flexShrink: 0 }} onClick={startGitLabAuth}>+ Add account</button>
+          )}
+        >
+          {glLoading ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.875rem' }}>
+              <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Loading…
+            </div>
+          ) : !glStatus?.configured ? (
+            <div className="auth-error">
+              GitLab OAuth is not configured. Add <code>GITLAB_CLIENT_ID</code> and <code>GITLAB_CLIENT_SECRET</code> env vars and redeploy.
+            </div>
+          ) : !glStatus?.connected ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+              <p style={{ color: 'var(--muted)', fontSize: '0.875rem', margin: 0 }}>No accounts connected. Connect GitLab to browse repos and generate wiki docs.</p>
+              <button className="btn-primary" style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={startGitLabAuth}>
+                <GitLabIcon size={14} /> Connect GitLab
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+              {glAccounts.map(username => (
+                <div key={username} style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', padding: '0.5rem 0.75rem', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <GitLabIcon size={14} />
+                  <span style={{ flex: 1, fontSize: '0.875rem', fontWeight: 500 }}>@{username}</span>
+                  <button className="btn-danger-sm" onClick={() => handleGlDisconnect(username)}>Disconnect</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+
+      </div>{/* end right column */}
+      </div>{/* end two-column grid */}
 
       {/* Wiki Templates */}
       <SectionCard
