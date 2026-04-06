@@ -1,4 +1,4 @@
-module mdf-viewer
+module livewiki
 
 go 1.24.0
 

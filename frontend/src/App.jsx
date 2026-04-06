@@ -45,8 +45,19 @@ function IconSun() {
 function IconLogout() {
   return <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
 }
-function IconLink() {
-  return <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+function LogoMark() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+      {/* Page */}
+      <rect x="2" y="2" width="12" height="16" rx="2" stroke="currentColor" strokeWidth="1.6" opacity="0.9"/>
+      {/* Content lines */}
+      <line x1="4.5" y1="7"   x2="11" y2="7"   stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="4.5" y1="10"  x2="11" y2="10"  stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="4.5" y1="13"  x2="8.5" y2="13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      {/* Lightning bolt */}
+      <path d="M17 2 L14 9.5 L17 9.5 L14 19" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  )
 }
 
 const BASE_TABS = [
@@ -136,9 +147,9 @@ export default function App() {
       <aside className="sidebar">
         <div className="sidebar-logo-wrap">
           <div className="sidebar-logo">
-            <IconLink />
+            <LogoMark />
           </div>
-          <span className="sidebar-logo-title">MDF Viewer</span>
+          <span className="sidebar-logo-title">LiveWiki</span>
         </div>
 
         <nav className="sidebar-nav">
@@ -195,7 +206,7 @@ export default function App() {
         {/* Page content */}
         <main className="page-content">
           {tab === 'local'      && <FilePanel selectedFile={selectedFile} onSelect={handleSelect} onToast={addToast} />}
-          {tab === 'viewer'     && <MDFViewer file={selectedFile} onToast={addToast} />}
+          {tab === 'viewer'     && <MDFViewer file={selectedFile} onSelect={handleSelect} onToast={addToast} />}
           {tab === 'wiki'       && <WikiPage onToast={addToast} onFileCreated={handleSelect} />}
           {tab === 'orgs'       && <OrgPage user={user} onToast={addToast} />}
           {tab === 'settings'   && <SettingsPage onToast={addToast} />}
