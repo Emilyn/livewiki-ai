@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -823,13 +825,120 @@ func authMe(c *gin.Context) {
 	})
 }
 
+// ── OAuth security helpers ────────────────────────────────────────────────────
+
+// oauthEntry holds a short-lived value (origin or token) with an expiry.
+type oauthEntry struct {
+	value   string
+	expires time.Time
+}
+
+var (
+	oauthNonces   sync.Map // nonce  → origin  (10-min TTL; prevents CSRF + open-redirect)
+	exchangeCodes sync.Map // code   → secret  (60-sec TTL; keeps tokens out of URLs)
+)
+
+func init() {
+	// Background goroutine sweeps expired entries every minute.
+	go func() {
+		for range time.Tick(time.Minute) {
+			now := time.Now()
+			oauthNonces.Range(func(k, v any) bool {
+				if v.(oauthEntry).expires.Before(now) {
+					oauthNonces.Delete(k)
+				}
+				return true
+			})
+			exchangeCodes.Range(func(k, v any) bool {
+				if v.(oauthEntry).expires.Before(now) {
+					exchangeCodes.Delete(k)
+				}
+				return true
+			})
+		}
+	}()
+}
+
+// allowedOrigins returns the set of origins that OAuth flows may redirect back to.
+func allowedOrigins() map[string]bool {
+	allowed := map[string]bool{
+		"http://localhost:5173": true,
+		"http://localhost:8080": true,
+	}
+	if domain := os.Getenv("RAILWAY_PUBLIC_DOMAIN"); domain != "" {
+		allowed["https://"+domain] = true
+	}
+	// Space-separated extra origins, e.g. ALLOWED_ORIGINS="https://app.example.com"
+	for _, o := range strings.Fields(os.Getenv("ALLOWED_ORIGINS")) {
+		allowed[o] = true
+	}
+	return allowed
+}
+
+// oauthStartState validates origin, stores a nonce→origin mapping and returns
+// the opaque state string to embed in the OAuth authorization URL.
+func oauthStartState(origin string) (string, bool) {
+	if !allowedOrigins()[origin] {
+		return "", false
+	}
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "", false
+	}
+	state := base64.RawURLEncoding.EncodeToString(b)
+	oauthNonces.Store(state, oauthEntry{value: origin, expires: time.Now().Add(10 * time.Minute)})
+	return state, true
+}
+
+// oauthCallbackOrigin validates the state nonce and returns the stored origin.
+// The nonce is consumed (deleted) so it cannot be replayed.
+func oauthCallbackOrigin(state string) (string, bool) {
+	v, ok := oauthNonces.LoadAndDelete(state)
+	if !ok {
+		return "", false
+	}
+	e := v.(oauthEntry)
+	if time.Now().After(e.expires) {
+		return "", false
+	}
+	return e.value, true
+}
+
+// newExchangeCode stores a secret under a one-time code with a 60-second TTL.
+// The code is safe to pass in a redirect URL; the actual secret never touches URLs.
+func newExchangeCode(secret string) string {
+	b := make([]byte, 24)
+	rand.Read(b)
+	code := base64.RawURLEncoding.EncodeToString(b)
+	exchangeCodes.Store(code, oauthEntry{value: secret, expires: time.Now().Add(60 * time.Second)})
+	return code
+}
+
+// consumeExchangeCode atomically retrieves and deletes a one-time code.
+func consumeExchangeCode(code string) (string, bool) {
+	v, ok := exchangeCodes.LoadAndDelete(code)
+	if !ok {
+		return "", false
+	}
+	e := v.(oauthEntry)
+	if time.Now().After(e.expires) {
+		return "", false
+	}
+	return e.value, true
+}
+
 func googleAuthStart(c *gin.Context) {
 	if googleAuthConf == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Google auth not configured"})
 		return
 	}
 	origin := c.DefaultQuery("origin", "http://localhost:5173")
-	c.Redirect(http.StatusFound, googleAuthConf.AuthCodeURL(origin, oauth2.AccessTypeOnline))
+	state, ok := oauthStartState(origin)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid origin"})
+		return
+	}
+	c.Redirect(http.StatusFound, googleAuthConf.AuthCodeURL(state, oauth2.AccessTypeOnline))
 }
 
 func googleAuthCallback(c *gin.Context) {
@@ -838,7 +947,11 @@ func googleAuthCallback(c *gin.Context) {
 		return
 	}
 	code := c.Query("code")
-	origin := c.DefaultQuery("state", "http://localhost:5173")
+	origin, ok := oauthCallbackOrigin(c.Query("state"))
+	if !ok {
+		c.String(http.StatusBadRequest, "invalid or expired OAuth state")
+		return
+	}
 	if code == "" {
 		c.Redirect(http.StatusFound, origin+"?auth=error")
 		return
@@ -876,7 +989,9 @@ func googleAuthCallback(c *gin.Context) {
 		c.Redirect(http.StatusFound, origin+"?auth=error")
 		return
 	}
-	c.Redirect(http.StatusFound, origin+"?auth_token="+url.QueryEscape(authToken))
+	// Issue a short-lived exchange code instead of putting the JWT in the URL.
+	exchangeCode := newExchangeCode(authToken)
+	c.Redirect(http.StatusFound, origin+"?auth_code="+url.QueryEscape(exchangeCode))
 }
 
 // ── File handlers ─────────────────────────────────────────────────────────────
@@ -1158,7 +1273,12 @@ func driveAuth(c *gin.Context) {
 	if c.IsAborted() {
 		return
 	}
-	state := c.DefaultQuery("origin", "http://localhost:5173")
+	origin := c.DefaultQuery("origin", "http://localhost:5173")
+	state, ok := oauthStartState(origin)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid origin"})
+		return
+	}
 	c.Redirect(http.StatusFound, driveClient.AuthURL(state))
 }
 
@@ -1168,7 +1288,11 @@ func driveCallback(c *gin.Context) {
 		return
 	}
 	code := c.Query("code")
-	origin := c.DefaultQuery("state", "http://localhost:5173")
+	origin, ok := oauthCallbackOrigin(c.Query("state"))
+	if !ok {
+		c.String(http.StatusBadRequest, "invalid or expired OAuth state")
+		return
+	}
 	if code == "" {
 		c.Redirect(http.StatusFound, origin+"?drive=error")
 		return
@@ -1438,7 +1562,12 @@ func githubAuthStart(c *gin.Context) {
 		return
 	}
 	origin := c.DefaultQuery("origin", "http://localhost:5173")
-	c.Redirect(http.StatusFound, githubOAuthConf.AuthCodeURL(origin, oauth2.AccessTypeOnline))
+	state, ok := oauthStartState(origin)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid origin"})
+		return
+	}
+	c.Redirect(http.StatusFound, githubOAuthConf.AuthCodeURL(state, oauth2.AccessTypeOnline))
 }
 
 func githubAuthCallback(c *gin.Context) {
@@ -1447,7 +1576,11 @@ func githubAuthCallback(c *gin.Context) {
 		return
 	}
 	code := c.Query("code")
-	origin := c.DefaultQuery("state", "http://localhost:5173")
+	origin, ok := oauthCallbackOrigin(c.Query("state"))
+	if !ok {
+		c.String(http.StatusBadRequest, "invalid or expired OAuth state")
+		return
+	}
 	if code == "" {
 		c.Redirect(http.StatusFound, origin+"?github=error")
 		return
@@ -1458,7 +1591,8 @@ func githubAuthCallback(c *gin.Context) {
 		c.Redirect(http.StatusFound, origin+"?github=error")
 		return
 	}
-	c.Redirect(http.StatusFound, origin+"?github_token="+url.QueryEscape(token.AccessToken))
+	exchangeCode := newExchangeCode(token.AccessToken)
+	c.Redirect(http.StatusFound, origin+"?github_code="+url.QueryEscape(exchangeCode))
 }
 
 func githubSaveToken(c *gin.Context) {
@@ -1726,7 +1860,12 @@ func gitlabAuthStart(c *gin.Context) {
 		return
 	}
 	origin := c.DefaultQuery("origin", "http://localhost:5173")
-	c.Redirect(http.StatusFound, gitlabOAuthConf.AuthCodeURL(origin, oauth2.AccessTypeOnline))
+	state, ok := oauthStartState(origin)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid origin"})
+		return
+	}
+	c.Redirect(http.StatusFound, gitlabOAuthConf.AuthCodeURL(state, oauth2.AccessTypeOnline))
 }
 
 func gitlabAuthCallback(c *gin.Context) {
@@ -1735,7 +1874,11 @@ func gitlabAuthCallback(c *gin.Context) {
 		return
 	}
 	code := c.Query("code")
-	origin := c.DefaultQuery("state", "http://localhost:5173")
+	origin, ok := oauthCallbackOrigin(c.Query("state"))
+	if !ok {
+		c.String(http.StatusBadRequest, "invalid or expired OAuth state")
+		return
+	}
 	if code == "" {
 		c.Redirect(http.StatusFound, origin+"?gitlab=error")
 		return
@@ -1746,7 +1889,54 @@ func gitlabAuthCallback(c *gin.Context) {
 		c.Redirect(http.StatusFound, origin+"?gitlab=error")
 		return
 	}
-	c.Redirect(http.StatusFound, origin+"?gitlab_token="+url.QueryEscape(token.AccessToken))
+	exchangeCode := newExchangeCode(token.AccessToken)
+	c.Redirect(http.StatusFound, origin+"?gitlab_code="+url.QueryEscape(exchangeCode))
+}
+
+// ── Exchange-code endpoints ───────────────────────────────────────────────────
+// These let the frontend convert a short-lived one-time code (safe in URLs)
+// into the actual secret without ever putting the secret in a URL.
+
+func authExchange(c *gin.Context) {
+	code := c.Query("code")
+	if code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "code required"})
+		return
+	}
+	token, ok := consumeExchangeCode(code)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired code"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": token})
+}
+
+func githubExchange(c *gin.Context) {
+	code := c.Query("code")
+	if code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "code required"})
+		return
+	}
+	token, ok := consumeExchangeCode(code)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired code"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": token})
+}
+
+func gitlabExchange(c *gin.Context) {
+	code := c.Query("code")
+	if code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "code required"})
+		return
+	}
+	token, ok := consumeExchangeCode(code)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired code"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": token})
 }
 
 func gitlabSaveToken(c *gin.Context) {
@@ -3096,6 +3286,27 @@ Base this on the actual code flows you can see.`, body.Repo),
 // ── main ──────────────────────────────────────────────────────────────────────
 
 func main() {
+	// Warn loudly on startup about missing critical config so misconfigured
+	// deployments fail obviously rather than silently.
+	if os.Getenv("SUPER_ADMIN_EMAIL") == "" {
+		log.Println("WARNING: SUPER_ADMIN_EMAIL is not set — no super-admin will be bootstrapped")
+	}
+	if os.Getenv("GIN_MODE") == "release" {
+		missingOAuth := []string{}
+		if os.Getenv("GITHUB_CLIENT_ID") == "" || os.Getenv("GITHUB_CLIENT_SECRET") == "" {
+			missingOAuth = append(missingOAuth, "GitHub")
+		}
+		if os.Getenv("GITLAB_CLIENT_ID") == "" || os.Getenv("GITLAB_CLIENT_SECRET") == "" {
+			missingOAuth = append(missingOAuth, "GitLab")
+		}
+		if os.Getenv("GOOGLE_CLIENT_ID") == "" || os.Getenv("GOOGLE_CLIENT_SECRET") == "" {
+			missingOAuth = append(missingOAuth, "Google")
+		}
+		for _, provider := range missingOAuth {
+			log.Printf("WARNING: %s OAuth credentials not set — %s login/integration will be disabled", provider, provider)
+		}
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -3124,6 +3335,7 @@ func main() {
 		a.GET("/me", authMiddleware, authMe)
 		a.GET("/google", googleAuthStart)
 		a.GET("/google/callback", googleAuthCallback)
+		a.GET("/exchange", authExchange) // one-time token exchange (never puts JWT in URL)
 
 		// Settings routes
 		s := api.Group("/settings", authMiddleware)
@@ -3144,9 +3356,10 @@ func main() {
 		f.DELETE("/folders/:folderid", deleteFolder)
 		f.PUT("/:id/folder", assignFileFolder)
 
-		// GitHub OAuth (auth + callback are public browser-redirect endpoints)
+		// GitHub OAuth (auth + callback + exchange are public browser-redirect endpoints)
 		api.GET("/github/auth", githubAuthStart)
 		api.GET("/github/callback", githubAuthCallback)
+		api.GET("/github/exchange", githubExchange)
 		gh := api.Group("/github", authMiddleware)
 		gh.GET("/status", githubStatus)
 		gh.PUT("/token", githubSaveToken)
@@ -3158,6 +3371,7 @@ func main() {
 		// GitLab OAuth
 		api.GET("/gitlab/auth", gitlabAuthStart)
 		api.GET("/gitlab/callback", gitlabAuthCallback)
+		api.GET("/gitlab/exchange", gitlabExchange)
 		gl := api.Group("/gitlab", authMiddleware)
 		gl.GET("/status", gitlabStatus)
 		gl.PUT("/token", gitlabSaveToken)

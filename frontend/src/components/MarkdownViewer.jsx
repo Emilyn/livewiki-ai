@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import mermaid from 'mermaid'
+import DOMPurify from 'dompurify'
 import { getFileContent, saveFileContent, getDriveFileContent, saveDriveFileContent } from '../api'
 
 mermaid.initialize({ startOnLoad: false, theme: 'dark', darkMode: true })
@@ -13,7 +14,7 @@ function MermaidBlock({ code }) {
   useEffect(() => {
     const id = 'mermaid-' + Math.random().toString(36).slice(2)
     mermaid.render(id, code)
-      .then(({ svg }) => setSvg(svg))
+      .then(({ svg }) => setSvg(DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } })))
       .catch(e => setError(e.message || 'Diagram error'))
   }, [code])
 

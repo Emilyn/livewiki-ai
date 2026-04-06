@@ -4,9 +4,15 @@ frontend/dist/
 
 # Backend build artefacts
 backend/mdf-viewer-server
+backend/server
 backend/uploads/
+
+# Secrets & local config — never commit these
+.env
+*.env
+!.env.example
 
 # OS / editor
 .DS_Store
 *.swp
-.env
+*.swo

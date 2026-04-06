@@ -112,26 +112,50 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const ssoToken = params.get('auth_token')
-    if (ssoToken) { localStorage.setItem('mdf_token', ssoToken); window.history.replaceState({}, '', '/') }
-    const ghToken = params.get('github_token')
-    if (ghToken) {
-      window.history.replaceState({}, '', '/')
-      if (localStorage.getItem('mdf_token')) {
-        saveGitHubToken(ghToken).then(() => setTab('wiki')).catch(() => {})
+    async function init() {
+      const params = new URLSearchParams(window.location.search)
+
+      // Exchange short-lived codes for secrets (codes are safe in URLs; actual
+      // tokens/JWTs never appear in URLs, browser history, or server logs).
+      const authCode = params.get('auth_code')
+      if (authCode) {
+        window.history.replaceState({}, '', '/')
+        try {
+          const res = await fetch(`/api/auth/exchange?code=${encodeURIComponent(authCode)}`)
+          const data = await res.json()
+          if (data.token) localStorage.setItem('mdf_token', data.token)
+        } catch {}
       }
-    }
-    const glToken = params.get('gitlab_token')
-    if (glToken) {
-      window.history.replaceState({}, '', '/')
-      if (localStorage.getItem('mdf_token')) {
-        saveGitLabToken(glToken).then(() => setTab('wiki')).catch(() => {})
+
+      const ghCode = params.get('github_code')
+      if (ghCode) {
+        window.history.replaceState({}, '', '/')
+        if (localStorage.getItem('mdf_token')) {
+          try {
+            const res = await fetch(`/api/github/exchange?code=${encodeURIComponent(ghCode)}`)
+            const data = await res.json()
+            if (data.token) await saveGitHubToken(data.token).then(() => setTab('wiki')).catch(() => {})
+          } catch {}
+        }
       }
+
+      const glCode = params.get('gitlab_code')
+      if (glCode) {
+        window.history.replaceState({}, '', '/')
+        if (localStorage.getItem('mdf_token')) {
+          try {
+            const res = await fetch(`/api/gitlab/exchange?code=${encodeURIComponent(glCode)}`)
+            const data = await res.json()
+            if (data.token) await saveGitLabToken(data.token).then(() => setTab('wiki')).catch(() => {})
+          } catch {}
+        }
+      }
+
+      if (localStorage.getItem('mdf_token')) {
+        authMe().then(u => { setUser(u); setAuthChecked(true) }).catch(() => { localStorage.removeItem('mdf_token'); setAuthChecked(true) })
+      } else { setAuthChecked(true) }
     }
-    if (localStorage.getItem('mdf_token')) {
-      authMe().then(u => { setUser(u); setAuthChecked(true) }).catch(() => { localStorage.removeItem('mdf_token'); setAuthChecked(true) })
-    } else { setAuthChecked(true) }
+    init()
   }, [])
 
   const handleLogout = () => { localStorage.removeItem('mdf_token'); setUser(null); setSelectedFile(null); setTab('local') }
