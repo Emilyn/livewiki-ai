@@ -6,7 +6,7 @@
   },
   "deploy": {
     "startCommand": "./server",
-    "healthcheckPath": "/api/files",
+    "healthcheckPath": "/health",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
   }
