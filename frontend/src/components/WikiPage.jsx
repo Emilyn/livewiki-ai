@@ -5,6 +5,8 @@ import mermaid from 'mermaid'
 import {
   getGitHubStatus,
   listGitHubRepos,
+  getGitLabStatus,
+  listGitLabRepos,
   listWikis, getWikiPage, generateWikiV2, deleteWikiV2, wikiChat,
   listTemplates,
 } from '../api'
@@ -16,6 +18,13 @@ function GitHubIcon({ size = 16 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
       <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+    </svg>
+  )
+}
+function GitLabIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 01-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 014.82 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0118.6 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.51L23 13.45a.84.84 0 01-.35.94z"/>
     </svg>
   )
 }
@@ -298,8 +307,9 @@ function WikiPageViewer({ wikiSlug, page }) {
 
 // ── Main WikiPage ─────────────────────────────────────────────────────────────
 export default function WikiPage({ onToast }) {
-  // GitHub + repo state
+  // GitHub + GitLab + repo state
   const [ghStatus, setGhStatus]     = useState(null)
+  const [glStatus, setGlStatus]     = useState(null)
   const [repos, setRepos]           = useState([])
   const [repoSearch, setRepoSearch] = useState('')
 
@@ -330,14 +340,21 @@ export default function WikiPage({ onToast }) {
   const [regenTemplateId, setRegenTemplateId] = useState('')
 
   useEffect(() => {
-    getGitHubStatus()
-      .then(s => {
-        setGhStatus(s)
-        if (s.connected) {
-          listGitHubRepos().then(setRepos).catch(() => {})
-        }
+    const ghPromise = getGitHubStatus()
+      .then(s => { setGhStatus(s); return s })
+      .catch(() => { const s = { connected: false, configured: false, accounts: [] }; setGhStatus(s); return s })
+    const glPromise = getGitLabStatus()
+      .then(s => { setGlStatus(s); return s })
+      .catch(() => { const s = { connected: false, configured: false, accounts: [] }; setGlStatus(s); return s })
+
+    Promise.all([ghPromise, glPromise]).then(([gh, gl]) => {
+      const fetches = []
+      if (gh.connected) fetches.push(listGitHubRepos().then(r => r.map(x => ({ ...x, source: 'github' }))).catch(() => []))
+      if (gl.connected) fetches.push(listGitLabRepos().catch(() => []))
+      Promise.all(fetches).then(results => {
+        setRepos(results.flat())
       })
-      .catch(() => setGhStatus({ connected: false, configured: false, accounts: [] }))
+    })
 
     listWikis()
       .then(w => { setWikis(w || []); setWikisLoaded(true) })
@@ -357,7 +374,7 @@ export default function WikiPage({ onToast }) {
     setGenRepo(repo.full_name)
     setView('generating')
     try {
-      const meta = await generateWikiV2(repo.full_name, branch || repo.default_branch, templateId)
+      const meta = await generateWikiV2(repo.full_name, branch || repo.default_branch, templateId, repo.source || 'github')
       setWikis(w => {
         const idx = w.findIndex(x => x.repo_slug === meta.repo_slug)
         if (idx >= 0) { const next = [...w]; next[idx] = meta; return next }
@@ -399,18 +416,22 @@ export default function WikiPage({ onToast }) {
   }
 
   // ── Not connected ───────────────────────────────────────────────────────────
-  if (!ghStatus) return <div className="loading-overlay"><span className="spinner" /></div>
+  if (!ghStatus || !glStatus) return <div className="loading-overlay"><span className="spinner" /></div>
 
-  if (!ghStatus.connected) {
+  const anyConnected = ghStatus.connected || glStatus.connected
+  if (!anyConnected) {
     return (
       <div style={{ maxWidth: 480 }}>
         <div className="card">
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', padding: '2.5rem 1.5rem', textAlign: 'center' }}>
-            <GitHubIcon size={40} />
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <GitHubIcon size={36} />
+              <GitLabIcon size={36} />
+            </div>
             <div>
               <h3 style={{ marginBottom: '0.5rem' }}>Living Wiki</h3>
               <p style={{ color: 'var(--muted)', fontSize: '0.875rem' }}>
-                Connect your GitHub account and AI provider in <strong>Settings</strong>, then come back here to auto-generate wiki docs from your repos.
+                Connect your GitHub or GitLab account and AI provider in <strong>Settings</strong>, then come back here to auto-generate wiki docs from your repos.
               </p>
             </div>
           </div>
@@ -440,7 +461,7 @@ export default function WikiPage({ onToast }) {
             ← All wikis
           </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0 }}>
-            <GitHubIcon size={14} />
+            {activeWiki.source === 'gitlab' ? <GitLabIcon size={14} /> : <GitHubIcon size={14} />}
             <span style={{ fontWeight: 600, fontSize: '0.9375rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {activeWiki.repo}
             </span>
@@ -609,9 +630,10 @@ export default function WikiPage({ onToast }) {
                   className="btn-primary"
                   onClick={() => {
                     setShowRegenModal(false)
-                    const repo = repos.find(r => r.full_name === activeWiki.repo)
+                    const repo = repos.find(r => r.full_name === activeWiki.repo && (r.source || 'github') === (activeWiki.source || 'github'))
+                      || repos.find(r => r.full_name === activeWiki.repo)
                     if (repo) handleGenerate(repo, regenBranch, regenTemplateId)
-                    else onToast('Repo not found', 'error')
+                    else handleGenerate({ full_name: activeWiki.repo, default_branch: activeWiki.branch, source: activeWiki.source || 'github' }, regenBranch, regenTemplateId)
                   }}
                 >
                   Regenerate
@@ -673,7 +695,7 @@ export default function WikiPage({ onToast }) {
                         if (isExpanded) { setExpandedRepo(null) } else { setExpandedRepo(r.id); setBranchInput(r.default_branch || 'main') }
                       }}
                     >
-                      <div className="file-icon"><GitHubIcon size={16} /></div>
+                      <div className="file-icon">{r.source === 'gitlab' ? <GitLabIcon size={16} /> : <GitHubIcon size={16} />}</div>
                       <div className="file-info">
                         <div className="file-name">{r.full_name}</div>
                         {r.description && <div className="file-meta">{r.description}</div>}
@@ -738,7 +760,7 @@ export default function WikiPage({ onToast }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
         <div>
           <h2 style={{ fontSize: '1.0625rem', marginBottom: '0.25rem' }}>Your Wikis</h2>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--muted)' }}>Auto-generated documentation from your GitHub repositories</p>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--muted)' }}>Auto-generated documentation from your GitHub and GitLab repositories</p>
         </div>
         <button
           className="btn-primary"
