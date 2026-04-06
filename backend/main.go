@@ -2702,6 +2702,8 @@ func main() {
 
 	r := gin.Default()
 
+	r.GET("/health", func(c *gin.Context) { c.Status(http.StatusOK) })
+
 	if os.Getenv("GIN_MODE") != "release" {
 		r.Use(cors.New(cors.Config{
 			AllowOrigins:     []string{"http://localhost:5173"},
