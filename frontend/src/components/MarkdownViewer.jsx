@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import mermaid from 'mermaid'
 import DOMPurify from 'dompurify'
-import { getFileContent, saveFileContent, getDriveFileContent, saveDriveFileContent } from '../api'
+import { getFileContent, saveFileContent, getDriveFileContent, saveDriveFileContent, aiInlineEdit } from '../api'
 
 mermaid.initialize({ startOnLoad: false, theme: 'dark', darkMode: true })
 
@@ -46,6 +46,166 @@ function Preview({ content }) {
   )
 }
 
+const AI_ACTIONS = [
+  { label: 'Improve', instruction: 'Improve the clarity and quality of this text while keeping the same meaning and markdown formatting.' },
+  { label: 'Shorter', instruction: 'Make this text more concise. Remove redundancy but keep all key information and markdown formatting.' },
+  { label: 'Longer',  instruction: 'Expand this text with more detail and depth. Keep the same markdown formatting style.' },
+  { label: 'Fix grammar', instruction: 'Fix any grammar, spelling, and punctuation issues. Do not change the meaning or structure.' },
+  { label: 'Simplify', instruction: 'Rewrite this in simpler, plainer language that is easy to understand. Keep markdown formatting.' },
+]
+
+function AIEditPopover({ anchor, selectedText, onApply, onClose }) {
+  const [custom, setCustom]     = useState('')
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState('')
+  const [preview, setPreview]   = useState(null)
+  const [activeInstr, setActiveInstr] = useState(null)
+  const popRef = useRef()
+
+  // Position the popover above the anchor point
+  const style = {
+    position: 'fixed',
+    top: Math.max(8, anchor.y - 8),
+    left: Math.max(8, Math.min(anchor.x, window.innerWidth - 360 - 8)),
+    transform: 'translateY(-100%)',
+    zIndex: 1000,
+    background: 'var(--surface)',
+    border: '1px solid var(--border)',
+    borderRadius: 10,
+    boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
+    padding: '0.75rem',
+    width: 340,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.5rem',
+  }
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (popRef.current && !popRef.current.contains(e.target)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  const run = async (instruction) => {
+    setLoading(true)
+    setError('')
+    setPreview(null)
+    setActiveInstr(instruction)
+    try {
+      const { result } = await aiInlineEdit(selectedText, instruction)
+      setPreview(result)
+    } catch (e) {
+      setError(e?.response?.data?.error || 'AI request failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div ref={popRef} style={style} onMouseDown={e => e.stopPropagation()}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M12 3L9.5 9.5 3 12l6.5 2.5L12 21l2.5-6.5L21 12l-6.5-2.5z"/></svg>
+          AI Edit
+        </span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: '0 2px', fontSize: '1rem', lineHeight: 1 }}>×</button>
+      </div>
+
+      {/* Quick actions */}
+      {!preview && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+          {AI_ACTIONS.map(a => (
+            <button
+              key={a.label}
+              disabled={loading}
+              onClick={() => run(a.instruction)}
+              style={{
+                fontSize: '0.72rem', padding: '0.25rem 0.55rem',
+                background: 'var(--surface2)', border: '1px solid var(--border)',
+                color: 'var(--text)', borderRadius: 6, cursor: 'pointer',
+                opacity: loading ? 0.5 : 1,
+              }}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Custom instruction */}
+      {!preview && (
+        <div style={{ display: 'flex', gap: '0.35rem' }}>
+          <input
+            value={custom}
+            onChange={e => setCustom(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && custom.trim()) run(custom.trim()) }}
+            placeholder="Custom instruction…"
+            disabled={loading}
+            style={{
+              flex: 1, fontSize: '0.8rem', padding: '0.3rem 0.5rem',
+              background: 'var(--bg)', border: '1px solid var(--border)',
+              color: 'var(--text)', borderRadius: 6, outline: 'none',
+            }}
+          />
+          <button
+            disabled={loading || !custom.trim()}
+            onClick={() => run(custom.trim())}
+            style={{
+              padding: '0.3rem 0.6rem', fontSize: '0.75rem',
+              background: 'var(--accent)', color: 'white',
+              border: 'none', borderRadius: 6, cursor: 'pointer',
+              opacity: loading || !custom.trim() ? 0.5 : 1,
+            }}
+          >
+            {loading ? '…' : '→'}
+          </button>
+        </div>
+      )}
+
+      {/* Loading */}
+      {loading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: 'var(--muted)' }}>
+          <span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Thinking…
+        </div>
+      )}
+
+      {/* Error */}
+      {error && <div style={{ fontSize: '0.75rem', color: 'var(--danger)' }}>{error}</div>}
+
+      {/* Preview + accept/reject */}
+      {preview && (
+        <>
+          <div style={{
+            fontSize: '0.78rem', color: 'var(--muted)', background: 'var(--surface2)',
+            border: '1px solid var(--border)', borderRadius: 6,
+            padding: '0.5rem 0.6rem', maxHeight: 160, overflowY: 'auto',
+            whiteSpace: 'pre-wrap', fontFamily: 'monospace', lineHeight: 1.5,
+          }}>
+            {preview}
+          </div>
+          <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'flex-end' }}>
+            <button
+              onClick={() => { setPreview(null); setActiveInstr(null) }}
+              style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 6, cursor: 'pointer' }}
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => onApply(preview)}
+              style={{ fontSize: '0.75rem', padding: '0.3rem 0.75rem', background: 'var(--accent)', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+            >
+              Apply
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 const TOOLBAR = [
   { label: 'B',   style: { fontWeight: 700 },      wrap: ['**', '**'],   title: 'Bold' },
   { label: 'I',   style: { fontStyle: 'italic' },   wrap: ['_', '_'],     title: 'Italic' },
@@ -66,6 +226,7 @@ export default function MarkdownViewer({ file, onToast }) {
   const [mode, setMode]       = useState('view') // 'view' | 'edit' | 'split'
   const [saving, setSaving]   = useState(false)
   const [loading, setLoading] = useState(false)
+  const [aiPopover, setAiPopover] = useState(null) // { x, y, start, end, text }
   const textareaRef = useRef()
 
   useEffect(() => {
@@ -98,6 +259,29 @@ export default function MarkdownViewer({ file, onToast }) {
   }
 
   const handleDiscard = () => setDraft(content)
+
+  const handleTextareaMouseUp = useCallback((e) => {
+    const ta = textareaRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const end   = ta.selectionEnd
+    if (end <= start) { setAiPopover(null); return }
+    const text = draft.slice(start, end).trim()
+    if (!text) { setAiPopover(null); return }
+    setAiPopover({ x: e.clientX, y: e.clientY, start, end, text })
+  }, [draft])
+
+  const handleAiApply = useCallback((result) => {
+    if (!aiPopover) return
+    const { start, end } = aiPopover
+    const next = draft.slice(0, start) + result + draft.slice(end)
+    setDraft(next)
+    setAiPopover(null)
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current
+      if (ta) { ta.focus(); ta.setSelectionRange(start, start + result.length) }
+    })
+  }, [aiPopover, draft])
 
   // Toolbar action: insert wrap/prefix/block around selection
   const applyFormat = useCallback((action) => {
@@ -239,6 +423,7 @@ export default function MarkdownViewer({ file, onToast }) {
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={handleKeyDown}
+            onMouseUp={handleTextareaMouseUp}
             spellCheck={false}
             style={{
               flex: 1,
@@ -265,6 +450,15 @@ export default function MarkdownViewer({ file, onToast }) {
           </div>
         )}
       </div>
+
+      {aiPopover && (
+        <AIEditPopover
+          anchor={{ x: aiPopover.x, y: aiPopover.y }}
+          selectedText={aiPopover.text}
+          onApply={handleAiApply}
+          onClose={() => setAiPopover(null)}
+        />
+      )}
     </div>
   )
 }

@@ -647,6 +647,32 @@ func callAI(ctx interface{ Done() <-chan struct{} }, settings UserSettings, syst
 	return r.Content[0].Text, nil
 }
 
+// ── AI inline edit ────────────────────────────────────────────────────────────
+
+func aiInlineEdit(c *gin.Context) {
+	var body struct {
+		Text        string `json:"text"`
+		Instruction string `json:"instruction"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.Text == "" || body.Instruction == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "text and instruction are required"})
+		return
+	}
+	settings := loadSettings(me(c).ID)
+	if settings.AnthropicAPIKey == "" && settings.OpenAIAPIKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no AI API key configured"})
+		return
+	}
+	system := `You are a markdown editor assistant. The user will provide a piece of markdown text and an instruction. Return ONLY the rewritten markdown — no explanation, no preamble, no code fences wrapping the whole result. Preserve markdown formatting conventions.`
+	userMsg := "Instruction: " + body.Instruction + "\n\nText:\n" + body.Text
+	result, err := callAI(c.Request.Context(), settings, system, userMsg)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"result": result})
+}
+
 // ── FileMeta ──────────────────────────────────────────────────────────────────
 
 type FileMeta struct {
@@ -3341,6 +3367,9 @@ func main() {
 		s := api.Group("/settings", authMiddleware)
 		s.GET("", getSettings)
 		s.PUT("", putSettings)
+
+		// AI inline edit
+		api.POST("/ai/inline-edit", authMiddleware, aiInlineEdit)
 
 		// Protected file routes
 		f := api.Group("/files", authMiddleware)
