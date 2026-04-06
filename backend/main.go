@@ -19,9 +19,9 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
-	"mdf-viewer/auth"
-	"mdf-viewer/drive"
-	"mdf-viewer/mdf"
+	"livewiki/auth"
+	"livewiki/drive"
+	"livewiki/mdf"
 )
 
 var uploadsDir string

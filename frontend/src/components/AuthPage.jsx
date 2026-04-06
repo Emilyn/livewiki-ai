@@ -73,8 +73,8 @@ export default function AuthPage({ onAuth }) {
             <IconLink />
           </div>
           <div>
-            <div style={{ fontWeight: 700, fontSize: '1.0625rem' }}>MDF Viewer</div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>MDF4 measurement data explorer</div>
+            <div style={{ fontWeight: 700, fontSize: '1.0625rem' }}>LiveWiki</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>AI-powered living wikis for your repos</div>
           </div>
         </div>
 
