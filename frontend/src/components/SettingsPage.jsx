@@ -104,16 +104,54 @@ export default function SettingsPage({ onToast }) {
     listTemplates().then(setTemplates).catch(() => {})
   }, [])
 
+  const DEFAULT_TEMPLATE = {
+    name: 'Default (5 pages)',
+    pages: [
+      {
+        id: 'overview',
+        title: 'Overview',
+        prompt: 'Write an Overview page for this repository.\nInclude:\n- What this project does (1-2 paragraph summary)\n- Key features (bullet list)\n- Tech stack used\n- Prerequisites and how to get started (installation + first run commands)\n- Any important configuration\n\nBase everything on the actual code provided. Be concise but complete.',
+      },
+      {
+        id: 'architecture',
+        title: 'Architecture',
+        prompt: 'Write an Architecture page for this repository.\nInclude:\n- High-level architecture description (2-3 paragraphs)\n- A Mermaid diagram showing the main components and their relationships. Use graph TD or flowchart TD syntax.\n- Component responsibilities table (component | responsibility | key files)\n- Key design decisions and patterns used\n\nBase everything on the actual code. Make the Mermaid diagram reflect the real architecture.',
+      },
+      {
+        id: 'structure',
+        title: 'Project Structure',
+        prompt: 'Write a Project Structure page for this repository.\nInclude:\n- Directory tree (use `tree` style formatting in a code block)\n- Description of each major directory and what it contains\n- Key files and their purposes (table: file | purpose)\n- Conventions and patterns used in the codebase\n\nBe specific about the actual files present.',
+      },
+      {
+        id: 'modules',
+        title: 'Core Modules',
+        prompt: 'Write a Core Modules page for this repository.\nFor each major module/package/component in the codebase:\n- Module name as a heading\n- What it does\n- Key functions/classes/types with brief descriptions\n- Dependencies on other modules\n- Example usage if applicable\n\nFocus on the most important 4-6 modules. Use code snippets from the actual source where helpful.',
+      },
+      {
+        id: 'dataflow',
+        title: 'Data Flow',
+        prompt: 'Write a Data Flow page for this repository.\nInclude:\n- How data enters the system (inputs, API endpoints, user actions)\n- How it\'s processed and transformed\n- How it\'s stored/persisted\n- How it\'s returned/displayed\n- A Mermaid sequence diagram showing the main data flow\n- Error handling and edge cases\n\nBase this on the actual code flows you can see.',
+      },
+    ],
+  }
+
   const openNewTemplate = () => {
-    setTplDraft(JSON.stringify({
-      name: 'My Template',
-      pages: [
-        { id: 'overview', title: 'Overview', prompt: 'Write an overview of this project...' },
-        { id: 'api', title: 'API Reference', prompt: 'Document all API endpoints with request/response examples.' },
-      ]
-    }, null, 2))
+    setTplDraft(JSON.stringify(DEFAULT_TEMPLATE, null, 2))
     setTplError('')
     setEditingTpl('new')
+  }
+
+  const loadDefaultTemplate = async () => {
+    setTplSaving(true)
+    try {
+      const created = await createTemplate({ name: DEFAULT_TEMPLATE.name, pages: DEFAULT_TEMPLATE.pages })
+      setTemplates(t => [...t, created])
+      onToast('Default template added')
+    } catch {
+      onToast('Failed to add template', 'error')
+    } finally {
+      setTplSaving(false)
+    }
   }
 
   const openEditTemplate = (tpl) => {
@@ -317,9 +355,18 @@ export default function SettingsPage({ onToast }) {
             </div>
           </div>
         ) : templates.length === 0 ? (
-          <p style={{ color: 'var(--muted)', fontSize: '0.875rem', margin: 0 }}>
-            No templates yet. Create one to reuse custom page configs across wikis.
-          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <p style={{ color: 'var(--muted)', fontSize: '0.875rem', margin: 0 }}>
+              No templates yet. Start from the default 5-page template or create your own.
+            </p>
+            <button
+              className="btn-secondary"
+              style={{ alignSelf: 'flex-start', fontSize: '0.8125rem' }}
+              onClick={loadDefaultTemplate}
+              disabled={tplSaving}>
+              {tplSaving ? 'Adding…' : '+ Add default template'}
+            </button>
+          </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
             {templates.map(tpl => (
