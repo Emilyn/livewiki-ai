@@ -5,6 +5,12 @@ import {
   getGitLabStatus, disconnectGitLab, startGitLabAuth,
   listTemplates, createTemplate, updateTemplate, deleteTemplate,
 } from '../api'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
+import { cn } from '@/lib/utils'
 
 const CLAUDE_MODELS = [
   { id: 'claude-sonnet-4-6',         label: 'Claude Sonnet 4.6 (default)' },
@@ -33,45 +39,24 @@ function GitLabIcon({ size = 16 }) {
     </svg>
   )
 }
-function DriveIcon({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 87.3 78" fill="none">
-      <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3L27.5 53H0c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
-      <path d="M43.65 25L29.9 1.2C28.55 2 27.4 3.1 26.6 4.5L1.2 48.5c-.8 1.4-1.2 2.95-1.2 4.5h27.5z" fill="#00ac47"/>
-      <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.8l5.85 11.75z" fill="#ea4335"/>
-      <path d="M43.65 25L57.4 1.2C56.05.45 54.5 0 52.85 0H34.45c-1.65 0-3.2.45-4.55 1.2z" fill="#00832d"/>
-      <path d="M59.8 53H27.5L13.75 76.8c1.35.75 2.9 1.2 4.55 1.2h50.7c1.65 0 3.2-.45 4.55-1.2z" fill="#2684fc"/>
-      <path d="M73.4 26.5l-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25 59.8 53h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
-    </svg>
-  )
+
+const DEFAULT_TEMPLATE = {
+  name: 'Default (5 pages)',
+  pages: [
+    { id: 'overview', title: 'Overview', prompt: 'Write an Overview page for this repository.\nInclude:\n- What this project does (1-2 paragraph summary)\n- Key features (bullet list)\n- Tech stack used\n- Prerequisites and how to get started (installation + first run commands)\n- Any important configuration\n\nBase everything on the actual code provided. Be concise but complete.' },
+    { id: 'architecture', title: 'Architecture', prompt: 'Write an Architecture page for this repository.\nInclude:\n- High-level architecture description (2-3 paragraphs)\n- A Mermaid diagram showing the main components and their relationships. Use graph TD or flowchart TD syntax.\n- Component responsibilities table (component | responsibility | key files)\n- Key design decisions and patterns used\n\nBase everything on the actual code. Make the Mermaid diagram reflect the real architecture.' },
+    { id: 'structure', title: 'Project Structure', prompt: 'Write a Project Structure page for this repository.\nInclude:\n- Directory tree (use `tree` style formatting in a code block)\n- Description of each major directory and what it contains\n- Key files and their purposes (table: file | purpose)\n- Conventions and patterns used in the codebase\n\nBe specific about the actual files present.' },
+    { id: 'modules', title: 'Core Modules', prompt: 'Write a Core Modules page for this repository.\nFor each major module/package/component in the codebase:\n- Module name as a heading\n- What it does\n- Key functions/classes/types with brief descriptions\n- Dependencies on other modules\n- Example usage if applicable\n\nFocus on the most important 4-6 modules. Use code snippets from the actual source where helpful.' },
+    { id: 'dataflow', title: 'Data Flow', prompt: "Write a Data Flow page for this repository.\nInclude:\n- How data enters the system (inputs, API endpoints, user actions)\n- How it's processed and transformed\n- How it's stored/persisted\n- How it's returned/displayed\n- A Mermaid sequence diagram showing the main data flow\n- Error handling and edge cases\n\nBase this on the actual code flows you can see." },
+  ],
 }
 
-function SectionCard({ icon, title, subtitle, children, action }) {
+function ProviderAccountRow({ icon, name, onDisconnect }) {
   return (
-    <div className="card">
-      <div className="card-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', flex: 1, minWidth: 0 }}>
-          {icon && <span style={{ color: 'var(--accent)', flexShrink: 0 }}>{icon}</span>}
-          <div>
-            <h2>{title}</h2>
-            {subtitle && <p style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.125rem', fontWeight: 400 }}>{subtitle}</p>}
-          </div>
-        </div>
-        {action}
-      </div>
-      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {children}
-      </div>
-    </div>
-  )
-}
-
-function Field({ label, hint, children }) {
-  return (
-    <div className="auth-field">
-      <label>{label}</label>
-      {children}
-      {hint && <p style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.25rem' }}>{hint}</p>}
+    <div className="flex items-center gap-2.5 rounded-lg border border-border bg-muted/40 px-3 py-2">
+      {icon}
+      <span className="flex-1 text-sm font-medium">@{name}</span>
+      <Button variant="destructive" size="xs" onClick={() => onDisconnect(name)}>Disconnect</Button>
     </div>
   )
 }
@@ -91,8 +76,8 @@ export default function SettingsPage({ onToast }) {
   const [glStatus, setGlStatus]   = useState(null)
   const [glLoading, setGlLoading] = useState(true)
   const [templates, setTemplates]     = useState([])
-  const [editingTpl, setEditingTpl]   = useState(null)  // null | 'new' | template object
-  const [tplDraft, setTplDraft]       = useState('')     // JSON string being edited
+  const [editingTpl, setEditingTpl]   = useState(null)
+  const [tplDraft, setTplDraft]       = useState('')
   const [tplError, setTplError]       = useState('')
   const [tplSaving, setTplSaving]     = useState(false)
 
@@ -117,37 +102,6 @@ export default function SettingsPage({ onToast }) {
       .finally(() => setGlLoading(false))
     listTemplates().then(setTemplates).catch(() => {})
   }, [])
-
-  const DEFAULT_TEMPLATE = {
-    name: 'Default (5 pages)',
-    pages: [
-      {
-        id: 'overview',
-        title: 'Overview',
-        prompt: 'Write an Overview page for this repository.\nInclude:\n- What this project does (1-2 paragraph summary)\n- Key features (bullet list)\n- Tech stack used\n- Prerequisites and how to get started (installation + first run commands)\n- Any important configuration\n\nBase everything on the actual code provided. Be concise but complete.',
-      },
-      {
-        id: 'architecture',
-        title: 'Architecture',
-        prompt: 'Write an Architecture page for this repository.\nInclude:\n- High-level architecture description (2-3 paragraphs)\n- A Mermaid diagram showing the main components and their relationships. Use graph TD or flowchart TD syntax.\n- Component responsibilities table (component | responsibility | key files)\n- Key design decisions and patterns used\n\nBase everything on the actual code. Make the Mermaid diagram reflect the real architecture.',
-      },
-      {
-        id: 'structure',
-        title: 'Project Structure',
-        prompt: 'Write a Project Structure page for this repository.\nInclude:\n- Directory tree (use `tree` style formatting in a code block)\n- Description of each major directory and what it contains\n- Key files and their purposes (table: file | purpose)\n- Conventions and patterns used in the codebase\n\nBe specific about the actual files present.',
-      },
-      {
-        id: 'modules',
-        title: 'Core Modules',
-        prompt: 'Write a Core Modules page for this repository.\nFor each major module/package/component in the codebase:\n- Module name as a heading\n- What it does\n- Key functions/classes/types with brief descriptions\n- Dependencies on other modules\n- Example usage if applicable\n\nFocus on the most important 4-6 modules. Use code snippets from the actual source where helpful.',
-      },
-      {
-        id: 'dataflow',
-        title: 'Data Flow',
-        prompt: 'Write a Data Flow page for this repository.\nInclude:\n- How data enters the system (inputs, API endpoints, user actions)\n- How it\'s processed and transformed\n- How it\'s stored/persisted\n- How it\'s returned/displayed\n- A Mermaid sequence diagram showing the main data flow\n- Error handling and edge cases\n\nBase this on the actual code flows you can see.',
-      },
-    ],
-  }
 
   const openNewTemplate = () => {
     setTplDraft(JSON.stringify(DEFAULT_TEMPLATE, null, 2))
@@ -227,231 +181,242 @@ export default function SettingsPage({ onToast }) {
     } catch { onToast('Disconnect failed', 'error') }
   }
 
-  if (loading) return <div className="loading-overlay"><span className="spinner" /></div>
+  const selectClass = "h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus:border-ring dark:bg-input/30"
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-40">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-primary" />
+    </div>
+  )
 
   const ghAccounts = ghStatus?.accounts || []
   const glAccounts = glStatus?.accounts || []
 
   return (
-    <div style={{ maxWidth: 1100, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+    <div className="max-w-5xl space-y-5">
+      <div className="grid gap-5 md:grid-cols-2 items-start">
 
-      {/* Two-column grid on large screens */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '1.25rem', alignItems: 'start' }}>
-
-      {/* AI Provider */}
-      <SectionCard
-        icon={<svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M12 2a10 10 0 110 20A10 10 0 0112 2zm0 0v4m0 14v-4m-7-7h4m10 0h-4"/></svg>}
-        title="AI Provider"
-        subtitle="Used for the Living Wiki feature"
-      >
-        {/* Provider tabs */}
-        <div style={{ display: 'flex', background: 'var(--surface2)', borderRadius: 8, padding: 3, gap: 3 }}>
-          {[{ id: 'anthropic', label: 'Claude (Anthropic)' }, { id: 'openai', label: 'ChatGPT (OpenAI)' }].map(p => (
-            <button
-              key={p.id}
-              onClick={() => setProvider(p.id)}
-              style={{
-                flex: 1, padding: '0.45rem 0.75rem', borderRadius: 6, border: 'none',
-                background: provider === p.id ? 'var(--surface)' : 'transparent',
-                color: provider === p.id ? 'var(--text)' : 'var(--muted)',
-                fontWeight: provider === p.id ? 600 : 400,
-                fontSize: '0.875rem', cursor: 'pointer', transition: 'all 0.15s',
-                boxShadow: provider === p.id ? 'var(--shadow)' : 'none',
-              }}
-            >{p.label}</button>
-          ))}
-        </div>
-
-        {provider === 'anthropic' && (
-          <>
-            <Field label="Anthropic API Key" hint="Stored securely on the server, never shared.">
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <input type={showKey ? 'text' : 'password'} value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-ant-..." style={{ flex: 1 }} spellCheck={false} autoComplete="off" />
-                <button className="btn-secondary" onClick={() => setShowKey(v => !v)} style={{ flexShrink: 0, padding: '0.5rem 0.75rem' }}>{showKey ? 'Hide' : 'Show'}</button>
-              </div>
-            </Field>
-            <Field label="Claude Model">
-              <select value={model} onChange={e => setModel(e.target.value)} style={{ width: '100%' }}>
-                {CLAUDE_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-              </select>
-            </Field>
-          </>
-        )}
-
-        {provider === 'openai' && (
-          <>
-            <Field label="OpenAI API Key" hint="Stored securely on the server, never shared.">
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <input type={showOKey ? 'text' : 'password'} value={openaiKey} onChange={e => setOpenaiKey(e.target.value)} placeholder="sk-..." style={{ flex: 1 }} spellCheck={false} autoComplete="off" />
-                <button className="btn-secondary" onClick={() => setShowOKey(v => !v)} style={{ flexShrink: 0, padding: '0.5rem 0.75rem' }}>{showOKey ? 'Hide' : 'Show'}</button>
-              </div>
-            </Field>
-            <Field label="ChatGPT Model">
-              <select value={openaiModel} onChange={e => setOpenaiModel(e.target.value)} style={{ width: '100%' }}>
-                {OPENAI_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-              </select>
-            </Field>
-          </>
-        )}
-
-        <div>
-          <button className="btn-primary" onClick={handleSave} disabled={saving} style={{ minWidth: 100 }}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      </SectionCard>
-
-      {/* Right column: GitHub + GitLab */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-
-        {/* GitHub */}
-        <SectionCard
-          icon={<GitHubMark size={16} />}
-          title="GitHub"
-          subtitle="Connect to use the Living Wiki feature"
-          action={ghStatus?.configured && ghStatus?.connected && (
-            <button className="btn-add" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', flexShrink: 0 }} onClick={startGitHubAuth}>+ Add account</button>
-          )}
-        >
-          {ghLoading ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.875rem' }}>
-              <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Loading…
+        {/* AI Provider */}
+        <Card>
+          <CardHeader className="border-b">
+            <div className="flex items-center gap-2">
+              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" className="text-indigo-500">
+                <path d="M12 2a10 10 0 110 20A10 10 0 0112 2zm0 0v4m0 14v-4m-7-7h4m10 0h-4"/>
+              </svg>
+              <CardTitle>AI Provider</CardTitle>
             </div>
-          ) : !ghStatus?.configured ? (
-            <div className="auth-error">
-              GitHub OAuth is not configured. Add <code>GITHUB_CLIENT_ID</code> and <code>GITHUB_CLIENT_SECRET</code> env vars and redeploy.
-            </div>
-          ) : !ghStatus?.connected ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-              <p style={{ color: 'var(--muted)', fontSize: '0.875rem', margin: 0 }}>No accounts connected. Connect GitHub to browse repos and generate wiki docs.</p>
-              <button className="btn-primary" style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={startGitHubAuth}>
-                <GitHubMark size={14} /> Connect GitHub
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-              {ghAccounts.map(login => (
-                <div key={login} style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', padding: '0.5rem 0.75rem', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                  <GitHubMark size={14} />
-                  <span style={{ flex: 1, fontSize: '0.875rem', fontWeight: 500 }}>@{login}</span>
-                  <button className="btn-danger-sm" onClick={() => handleGhDisconnect(login)}>Disconnect</button>
-                </div>
+            <CardDescription>Used for the Living Wiki feature</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-4 space-y-4">
+            {/* Provider toggle */}
+            <div className="flex gap-1 rounded-lg border border-border bg-muted p-1">
+              {[{ id: 'anthropic', label: 'Claude (Anthropic)' }, { id: 'openai', label: 'ChatGPT (OpenAI)' }].map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => setProvider(p.id)}
+                  className={cn(
+                    'flex-1 rounded-md px-2.5 py-1.5 text-sm transition-all',
+                    provider === p.id
+                      ? 'bg-background text-foreground font-semibold shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {p.label}
+                </button>
               ))}
             </div>
-          )}
-        </SectionCard>
 
-        {/* GitLab */}
-        <SectionCard
-          icon={<GitLabIcon size={16} />}
-          title="GitLab"
-          subtitle="Connect to use the Living Wiki feature with GitLab repositories"
-          action={glStatus?.configured && glStatus?.connected && (
-            <button className="btn-add" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', flexShrink: 0 }} onClick={startGitLabAuth}>+ Add account</button>
-          )}
-        >
-          {glLoading ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.875rem' }}>
-              <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Loading…
-            </div>
-          ) : !glStatus?.configured ? (
-            <div className="auth-error">
-              GitLab OAuth is not configured. Add <code>GITLAB_CLIENT_ID</code> and <code>GITLAB_CLIENT_SECRET</code> env vars and redeploy.
-            </div>
-          ) : !glStatus?.connected ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-              <p style={{ color: 'var(--muted)', fontSize: '0.875rem', margin: 0 }}>No accounts connected. Connect GitLab to browse repos and generate wiki docs.</p>
-              <button className="btn-primary" style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={startGitLabAuth}>
-                <GitLabIcon size={14} /> Connect GitLab
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-              {glAccounts.map(username => (
-                <div key={username} style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', padding: '0.5rem 0.75rem', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                  <GitLabIcon size={14} />
-                  <span style={{ flex: 1, fontSize: '0.875rem', fontWeight: 500 }}>@{username}</span>
-                  <button className="btn-danger-sm" onClick={() => handleGlDisconnect(username)}>Disconnect</button>
+            {provider === 'anthropic' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Anthropic API Key</Label>
+                  <div className="flex gap-2">
+                    <Input type={showKey ? 'text' : 'password'} value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-ant-…" className="flex-1" spellCheck={false} autoComplete="off" />
+                    <Button variant="outline" size="sm" onClick={() => setShowKey(v => !v)} className="shrink-0">{showKey ? 'Hide' : 'Show'}</Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Stored securely on the server, never shared.</p>
                 </div>
-              ))}
-            </div>
-          )}
-        </SectionCard>
+                <div className="space-y-1.5">
+                  <Label>Claude Model</Label>
+                  <select className={selectClass} value={model} onChange={e => setModel(e.target.value)}>
+                    {CLAUDE_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                  </select>
+                </div>
+              </>
+            )}
 
-      </div>{/* end right column */}
-      </div>{/* end two-column grid */}
+            {provider === 'openai' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>OpenAI API Key</Label>
+                  <div className="flex gap-2">
+                    <Input type={showOKey ? 'text' : 'password'} value={openaiKey} onChange={e => setOpenaiKey(e.target.value)} placeholder="sk-…" className="flex-1" spellCheck={false} autoComplete="off" />
+                    <Button variant="outline" size="sm" onClick={() => setShowOKey(v => !v)} className="shrink-0">{showOKey ? 'Hide' : 'Show'}</Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Stored securely on the server, never shared.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>ChatGPT Model</Label>
+                  <select className={selectClass} value={openaiModel} onChange={e => setOpenaiModel(e.target.value)}>
+                    {OPENAI_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                  </select>
+                </div>
+              </>
+            )}
+
+            <Button onClick={handleSave} disabled={saving} className="min-w-[90px]">
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Right column: GitHub + GitLab */}
+        <div className="space-y-5">
+          {/* GitHub */}
+          <Card>
+            <CardHeader className="border-b">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <GitHubMark size={15} />
+                  <CardTitle>GitHub</CardTitle>
+                </div>
+                {ghStatus?.configured && ghStatus?.connected && (
+                  <Button variant="outline" size="xs" onClick={startGitHubAuth}>+ Add account</Button>
+                )}
+              </div>
+              <CardDescription>Connect to use the Living Wiki feature</CardDescription>
+            </CardHeader>
+            <CardContent className="pt-4">
+              {ghLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-primary" />
+                  Loading…
+                </div>
+              ) : !ghStatus?.configured ? (
+                <p className="rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive">
+                  GitHub OAuth is not configured. Add <code>GITHUB_CLIENT_ID</code> and <code>GITHUB_CLIENT_SECRET</code> env vars and redeploy.
+                </p>
+              ) : !ghStatus?.connected ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">No accounts connected. Connect GitHub to browse repos and generate wiki docs.</p>
+                  <Button size="sm" onClick={startGitHubAuth} className="flex items-center gap-1.5">
+                    <GitHubMark size={13} /> Connect GitHub
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {ghAccounts.map(login => (
+                    <ProviderAccountRow key={login} icon={<GitHubMark size={13} />} name={login} onDisconnect={handleGhDisconnect} />
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* GitLab */}
+          <Card>
+            <CardHeader className="border-b">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <GitLabIcon size={15} />
+                  <CardTitle>GitLab</CardTitle>
+                </div>
+                {glStatus?.configured && glStatus?.connected && (
+                  <Button variant="outline" size="xs" onClick={startGitLabAuth}>+ Add account</Button>
+                )}
+              </div>
+              <CardDescription>Connect to use the Living Wiki feature with GitLab repositories</CardDescription>
+            </CardHeader>
+            <CardContent className="pt-4">
+              {glLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-primary" />
+                  Loading…
+                </div>
+              ) : !glStatus?.configured ? (
+                <p className="rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive">
+                  GitLab OAuth is not configured. Add <code>GITLAB_CLIENT_ID</code> and <code>GITLAB_CLIENT_SECRET</code> env vars and redeploy.
+                </p>
+              ) : !glStatus?.connected ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">No accounts connected. Connect GitLab to browse repos and generate wiki docs.</p>
+                  <Button size="sm" onClick={startGitLabAuth} className="flex items-center gap-1.5">
+                    <GitLabIcon size={13} /> Connect GitLab
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {glAccounts.map(username => (
+                    <ProviderAccountRow key={username} icon={<GitLabIcon size={13} />} name={username} onDisconnect={handleGlDisconnect} />
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
 
       {/* Wiki Templates */}
-      <SectionCard
-        icon={<svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>}
-        title="Wiki Templates"
-        subtitle="Reusable page configs for wiki generation"
-        action={
-          editingTpl ? null : (
-            <button className="btn-add" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={openNewTemplate}>
-              + New template
-            </button>
-          )
-        }
-      >
-        {editingTpl ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <p style={{ fontSize: '0.8125rem', color: 'var(--muted)', margin: 0 }}>
-              Edit as JSON. The <code>name</code> field sets the template name. Each page needs <code>id</code>, <code>title</code>, and <code>prompt</code>.
-            </p>
-            <textarea
-              value={tplDraft}
-              onChange={e => { setTplDraft(e.target.value); setTplError('') }}
-              spellCheck={false}
-              rows={16}
-              style={{
-                fontFamily: "'Fira Code', 'Cascadia Code', monospace",
-                fontSize: '0.8125rem', lineHeight: 1.6,
-                background: 'var(--bg)', color: 'var(--text)',
-                border: `1px solid ${tplError ? 'var(--danger)' : 'var(--border)'}`,
-                borderRadius: 8, padding: '0.75rem', resize: 'vertical', outline: 'none',
-              }}
-              onFocus={e => e.target.style.borderColor = tplError ? 'var(--danger)' : 'var(--accent)'}
-              onBlur={e => e.target.style.borderColor = tplError ? 'var(--danger)' : 'var(--border)'}
-            />
-            {tplError && <p style={{ color: 'var(--danger)', fontSize: '0.8125rem', margin: 0 }}>{tplError}</p>}
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button className="btn-primary" onClick={handleSaveTemplate} disabled={tplSaving} style={{ minWidth: 80 }}>
-                {tplSaving ? 'Saving\u2026' : 'Save'}
-              </button>
-              <button className="btn-secondary" onClick={() => setEditingTpl(null)}>Cancel</button>
+      <Card>
+        <CardHeader className="border-b">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" className="text-indigo-500">
+                <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+              </svg>
+              <CardTitle>Wiki Templates</CardTitle>
             </div>
+            {!editingTpl && (
+              <Button variant="outline" size="xs" onClick={openNewTemplate}>+ New template</Button>
+            )}
           </div>
-        ) : templates.length === 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <p style={{ color: 'var(--muted)', fontSize: '0.875rem', margin: 0 }}>
-              No templates yet. Start from the default 5-page template or create your own.
-            </p>
-            <button
-              className="btn-secondary"
-              style={{ alignSelf: 'flex-start', fontSize: '0.8125rem' }}
-              onClick={loadDefaultTemplate}
-              disabled={tplSaving}>
-              {tplSaving ? 'Adding…' : '+ Add default template'}
-            </button>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-            {templates.map(tpl => (
-              <div key={tpl.id} style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', padding: '0.5rem 0.75rem', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 500, fontSize: '0.875rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tpl.name}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.125rem' }}>{tpl.pages?.length || 0} pages</div>
-                </div>
-                <button className="btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', flexShrink: 0 }} onClick={() => openEditTemplate(tpl)}>Edit</button>
-                <button className="btn-danger-sm" style={{ flexShrink: 0 }} onClick={() => handleDeleteTemplate(tpl)}>Delete</button>
+          <CardDescription>Reusable page configs for wiki generation</CardDescription>
+        </CardHeader>
+        <CardContent className="pt-4">
+          {editingTpl ? (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Edit as JSON. The <code className="bg-muted px-1 rounded text-xs">name</code> field sets the template name. Each page needs <code className="bg-muted px-1 rounded text-xs">id</code>, <code className="bg-muted px-1 rounded text-xs">title</code>, and <code className="bg-muted px-1 rounded text-xs">prompt</code>.
+              </p>
+              <Textarea
+                value={tplDraft}
+                onChange={e => { setTplDraft(e.target.value); setTplError('') }}
+                spellCheck={false}
+                rows={16}
+                className={cn('font-mono text-xs resize-y', tplError && 'border-destructive')}
+              />
+              {tplError && <p className="text-xs text-destructive">{tplError}</p>}
+              <div className="flex gap-2">
+                <Button onClick={handleSaveTemplate} disabled={tplSaving} className="min-w-[72px]">
+                  {tplSaving ? 'Saving…' : 'Save'}
+                </Button>
+                <Button variant="outline" onClick={() => setEditingTpl(null)}>Cancel</Button>
               </div>
-            ))}
-          </div>
-        )}
-      </SectionCard>
-
-
+            </div>
+          ) : templates.length === 0 ? (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">No templates yet. Start from the default 5-page template or create your own.</p>
+              <Button variant="outline" size="sm" onClick={loadDefaultTemplate} disabled={tplSaving}>
+                {tplSaving ? 'Adding…' : '+ Add default template'}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {templates.map(tpl => (
+                <div key={tpl.id} className="flex items-center gap-2.5 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{tpl.name}</div>
+                    <div className="text-xs text-muted-foreground">{tpl.pages?.length || 0} pages</div>
+                  </div>
+                  <Button variant="outline" size="xs" onClick={() => openEditTemplate(tpl)}>Edit</Button>
+                  <Button variant="destructive" size="xs" onClick={() => handleDeleteTemplate(tpl)}>Delete</Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

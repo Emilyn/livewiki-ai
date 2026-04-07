@@ -3,8 +3,11 @@ import {
   listOrgs, getOrg, inviteToOrg, removeOrgMember,
   changeOrgMemberRole, cancelOrgInvite, getOrgWikis
 } from '../api'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
 
-// ── Icons ─────────────────────────────────────────────────────────────────────
 function IconOrg({ size = 16 }) {
   return <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
 }
@@ -24,31 +27,23 @@ function IconCopy({ size = 13 }) {
   return <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const ROLE_COLORS = {
-  admin: { bg: 'rgba(99,102,241,0.12)', color: 'var(--accent)', border: 'rgba(99,102,241,0.25)' },
-  user:  { bg: 'rgba(148,163,184,0.1)', color: 'var(--muted)',  border: 'var(--border)' },
-}
-
 function RoleBadge({ role }) {
-  const c = ROLE_COLORS[role] || ROLE_COLORS.user
   return (
-    <span style={{ fontSize: '0.6875rem', fontWeight: 600, padding: '0.15rem 0.45rem',
-      borderRadius: 4, background: c.bg, color: c.color, border: `1px solid ${c.border}`, textTransform: 'capitalize' }}>
+    <Badge
+      variant={role === 'admin' ? 'default' : 'secondary'}
+      className={role === 'admin' ? 'bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 hover:bg-indigo-500/10' : ''}
+    >
       {role}
-    </span>
+    </Badge>
   )
 }
 
 function Avatar({ user }) {
   if (user.avatar_url) {
-    return <img src={user.avatar_url} alt={user.name} referrerPolicy="no-referrer"
-      style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+    return <img src={user.avatar_url} alt={user.name} referrerPolicy="no-referrer" className="h-7 w-7 rounded-full object-cover shrink-0" />
   }
   return (
-    <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: '0.75rem', fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+    <div className="h-7 w-7 rounded-full bg-indigo-500 flex items-center justify-center text-xs font-bold text-white shrink-0">
       {user.name?.[0]?.toUpperCase() ?? '?'}
     </div>
   )
@@ -58,7 +53,7 @@ function Avatar({ user }) {
 function MembersTab({ orgId, orgDetail, myRole, ownerId, currentUserId, onRefresh, onToast }) {
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviting, setInviting] = useState(false)
-  const [inviteResult, setInviteResult] = useState(null) // { status, token, link }
+  const [inviteResult, setInviteResult] = useState(null)
 
   const isAdmin = myRole === 'admin'
 
@@ -114,49 +109,41 @@ function MembersTab({ orgId, orgDetail, myRole, ownerId, currentUserId, onRefres
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+    <div className="space-y-5">
       {/* Invite form (admin only) */}
       {isAdmin && (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '1rem' }}>
-          <div style={{ fontSize: '0.8125rem', fontWeight: 600, marginBottom: '0.625rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+        <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+          <p className="text-sm font-semibold flex items-center gap-1.5">
             <IconMail /> Invite by email
-          </div>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <input
+          </p>
+          <div className="flex gap-2">
+            <Input
               type="email"
               placeholder="user@example.com"
               value={inviteEmail}
               onChange={e => { setInviteEmail(e.target.value); setInviteResult(null) }}
               onKeyDown={e => e.key === 'Enter' && handleInvite()}
-              style={{ flex: 1, fontSize: '0.8125rem' }}
+              className="flex-1"
             />
-            <button
-              onClick={handleInvite}
-              disabled={inviting || !inviteEmail.trim()}
-              style={{ padding: '0.45rem 1rem', fontSize: '0.8125rem', fontWeight: 600,
-                background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6,
-                cursor: inviting || !inviteEmail.trim() ? 'not-allowed' : 'pointer',
-                opacity: inviting || !inviteEmail.trim() ? 0.6 : 1 }}>
+            <Button onClick={handleInvite} disabled={inviting || !inviteEmail.trim()} size="sm">
               {inviting ? '…' : 'Invite'}
-            </button>
+            </Button>
           </div>
           {inviteResult && (
-            <div style={{ marginTop: '0.625rem', padding: '0.625rem 0.75rem', background: 'rgba(16,185,129,0.08)',
-              border: '1px solid rgba(16,185,129,0.25)', borderRadius: 6, fontSize: '0.8rem' }}>
-              <div style={{ color: '#10b981', fontWeight: 600, marginBottom: '0.25rem' }}>
+            <div className="rounded-lg border border-green-500/25 bg-green-500/8 px-3 py-2.5 space-y-1.5">
+              <p className="text-xs font-semibold text-green-600 dark:text-green-400">
                 {inviteResult.status === 'pending' ? 'Invite already pending' : 'Invite link created'}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}>
-                <code style={{ fontSize: '0.75rem', color: 'var(--muted)', wordBreak: 'break-all', flex: 1 }}>
-                  {inviteResult.link}
-                </code>
-                <button
+              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <code className="text-xs text-muted-foreground break-all flex-1">{inviteResult.link}</code>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="shrink-0"
                   onClick={() => { navigator.clipboard.writeText(inviteResult.link); onToast('Link copied') }}
-                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center',
-                    gap: '0.25rem', background: 'var(--surface2)', border: '1px solid var(--border)',
-                    borderRadius: 4, cursor: 'pointer', color: 'var(--text)', flexShrink: 0 }}>
+                >
                   <IconCopy /> Copy
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -165,50 +152,44 @@ function MembersTab({ orgId, orgDetail, myRole, ownerId, currentUserId, onRefres
 
       {/* Members list */}
       <div>
-        <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--muted)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">
           Members ({orgDetail.members.length})
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+        </p>
+        <div className="space-y-1.5">
           {orgDetail.members.map(m => (
-            <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: '0.625rem',
-              padding: '0.5rem 0.75rem', background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 8 }}>
+            <div key={m.user_id} className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-2">
               <Avatar user={m} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.875rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">
                   {m.name}
-                  {m.user_id === currentUserId && <span style={{ fontSize: '0.7rem', color: 'var(--muted)', marginLeft: 6 }}>(you)</span>}
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.email}</div>
+                  {m.user_id === currentUserId && <span className="text-xs text-muted-foreground ml-1.5">(you)</span>}
+                </p>
+                <p className="text-xs text-muted-foreground truncate">{m.email}</p>
               </div>
               <RoleBadge role={m.role} />
               {isAdmin && m.user_id !== ownerId && m.user_id !== currentUserId && (
-                <div style={{ display: 'flex', gap: '0.375rem', flexShrink: 0 }}>
+                <div className="flex gap-1.5 shrink-0">
                   <select
                     value={m.role}
                     onChange={e => handleRoleChange(m.user_id, e.target.value)}
-                    style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--surface2)', color: 'var(--text)' }}>
+                    className="h-6 rounded border border-input bg-background px-1.5 text-xs outline-none focus:border-ring dark:bg-input/30"
+                  >
                     <option value="user">user</option>
                     <option value="admin">admin</option>
                   </select>
-                  <button
-                    onClick={() => handleRemove(m.user_id)}
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
                     title="Remove member"
-                    style={{ padding: '0.25rem', background: 'transparent', border: '1px solid var(--border)',
-                      borderRadius: 4, cursor: 'pointer', color: 'var(--muted)', display: 'flex', alignItems: 'center' }}>
+                    onClick={() => handleRemove(m.user_id)}
+                  >
                     <IconTrash />
-                  </button>
+                  </Button>
                 </div>
               )}
-              {/* Non-admin can remove themselves (unless owner) */}
               {!isAdmin && m.user_id === currentUserId && m.user_id !== ownerId && (
-                <button
-                  onClick={() => handleRemove(m.user_id)}
-                  title="Leave org"
-                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: 'transparent',
-                    border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--muted)' }}>
-                  Leave
-                </button>
+                <Button variant="outline" size="xs" onClick={() => handleRemove(m.user_id)}>Leave</Button>
               )}
             </div>
           ))}
@@ -218,46 +199,41 @@ function MembersTab({ orgId, orgDetail, myRole, ownerId, currentUserId, onRefres
       {/* Pending invites (admin only) */}
       {isAdmin && orgDetail.invites?.length > 0 && (
         <div>
-          <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--muted)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">
             Pending Invites ({orgDetail.invites.length})
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+          </p>
+          <div className="space-y-1.5">
             {orgDetail.invites.map(inv => (
-              <div key={inv.id} style={{ display: 'flex', alignItems: 'center', gap: '0.625rem',
-                padding: '0.5rem 0.75rem', background: 'var(--surface)', border: '1px dashed var(--border)',
-                borderRadius: 8 }}>
-                <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--surface2)',
-                  border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div key={inv.id} className="flex items-center gap-2.5 rounded-lg border border-dashed border-border bg-card px-3 py-2">
+                <div className="h-7 w-7 rounded-full bg-muted border border-border flex items-center justify-center shrink-0 text-muted-foreground">
                   <IconMail size={13} />
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '0.875rem', fontWeight: 500 }}>{inv.email}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{inv.email}</p>
+                  <p className="text-xs text-muted-foreground">
                     Invited by {inv.invited_by} · expires {new Date(inv.expires_at).toLocaleDateString()}
-                  </div>
+                  </p>
                 </div>
-                <span style={{ fontSize: '0.6875rem', padding: '0.15rem 0.45rem', borderRadius: 4,
-                  background: 'rgba(234,179,8,0.1)', color: '#ca8a04', border: '1px solid rgba(234,179,8,0.25)' }}>
+                <Badge className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/20 hover:bg-yellow-500/10 text-[10px]">
                   pending
-                </span>
-                <button
-                  onClick={() => {
-                    const link = `${window.location.origin}/invite/${inv.token}`
-                    navigator.clipboard.writeText(link)
-                    onToast('Link copied')
-                  }}
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
                   title="Copy invite link"
-                  style={{ padding: '0.25rem', background: 'transparent', border: '1px solid var(--border)',
-                    borderRadius: 4, cursor: 'pointer', color: 'var(--muted)', display: 'flex', alignItems: 'center' }}>
+                  onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/invite/${inv.token}`); onToast('Link copied') }}
+                >
                   <IconCopy />
-                </button>
-                <button
-                  onClick={() => handleCancelInvite(inv.id)}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
                   title="Cancel invite"
-                  style={{ padding: '0.25rem', background: 'transparent', border: '1px solid var(--border)',
-                    borderRadius: 4, cursor: 'pointer', color: 'var(--muted)', display: 'flex', alignItems: 'center' }}>
+                  onClick={() => handleCancelInvite(inv.id)}
+                >
                   <IconTrash />
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -281,39 +257,32 @@ function WikisTab({ orgId, onToast }) {
   }, [orgId])
 
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', fontSize: '0.875rem' }}>
-      <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Loading wikis…
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-primary" />
+      Loading wikis…
     </div>
   )
 
   if (!wikis?.length) return (
-    <div style={{ textAlign: 'center', color: 'var(--muted)', fontSize: '0.875rem', padding: '2rem' }}>
-      No wikis have been generated yet in this org.
-    </div>
+    <p className="text-center text-sm text-muted-foreground py-8">No wikis have been generated yet in this org.</p>
   )
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+    <div className="space-y-1.5">
       {wikis.map(w => (
-        <div key={`${w.owner_id}-${w.slug}`} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem',
-          padding: '0.625rem 0.875rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }}>
-          <IconBook size={16} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.875rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {w.repo}
-            </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
-              {w.branch} · by {w.owner_name} · {w.pages?.length ?? 0} pages
-            </div>
+        <div key={`${w.owner_id}-${w.slug}`} className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3">
+          <span className="text-muted-foreground shrink-0"><IconBook size={15} /></span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate">{w.repo}</p>
+            <p className="text-xs text-muted-foreground">{w.branch} · by {w.owner_name} · {w.pages?.length ?? 0} pages</p>
           </div>
           {w.share_token && (
             <a
               href={`/share/${w.share_token}`}
               target="_blank"
               rel="noopener noreferrer"
-              style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.8rem', fontWeight: 500,
-                padding: '0.3rem 0.625rem', background: 'var(--surface2)', border: '1px solid var(--border)',
-                borderRadius: 5, color: 'var(--text)', textDecoration: 'none' }}>
+              className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-border hover:bg-muted transition-colors no-underline text-foreground shrink-0"
+            >
               <IconExternal /> View
             </a>
           )}
@@ -340,8 +309,8 @@ function OrgDetail({ org, currentUserId, onToast }) {
   useEffect(() => { load() }, [load])
 
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)', padding: '1.5rem' }}>
-      <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> Loading…
+    <div className="flex items-center gap-2 text-sm text-muted-foreground p-6">
+      <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-primary" /> Loading…
     </div>
   )
   if (!orgDetail) return null
@@ -352,30 +321,33 @@ function OrgDetail({ org, currentUserId, onToast }) {
   ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minWidth: 0 }}>
+    <div className="space-y-4 min-w-0">
       {/* Org header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-        <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(99,102,241,0.1)',
-          border: '1px solid rgba(99,102,241,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="h-9 w-9 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0 text-indigo-500">
           <IconOrg size={18} />
         </div>
         <div>
-          <div style={{ fontWeight: 700, fontSize: '1rem' }}>{orgDetail.org.name}</div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
+          <p className="font-bold">{orgDetail.org.name}</p>
+          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
             Created {new Date(orgDetail.org.created_at).toLocaleDateString()} · <RoleBadge role={orgDetail.role} />
-          </div>
+          </p>
         </div>
       </div>
 
       {/* Tab bar */}
-      <div style={{ display: 'flex', gap: '0.25rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.125rem' }}>
+      <div className="flex gap-0.5 border-b border-border">
         {tabs.map(t => (
-          <button key={t.id} onClick={() => setActiveTab(t.id)}
-            style={{ padding: '0.4rem 0.875rem', fontSize: '0.8125rem', fontWeight: activeTab === t.id ? 600 : 400,
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              color: activeTab === t.id ? 'var(--accent)' : 'var(--muted)',
-              borderBottom: `2px solid ${activeTab === t.id ? 'var(--accent)' : 'transparent'}`,
-              marginBottom: -1 }}>
+          <button
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            className={cn(
+              'px-3.5 py-2 text-sm font-medium transition-colors border-b-2 -mb-px',
+              activeTab === t.id
+                ? 'border-indigo-500 text-indigo-500'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            )}
+          >
             {t.label}
           </button>
         ))}
@@ -392,9 +364,7 @@ function OrgDetail({ org, currentUserId, onToast }) {
           onToast={onToast}
         />
       )}
-      {activeTab === 'wikis' && (
-        <WikisTab orgId={org.id} onToast={onToast} />
-      )}
+      {activeTab === 'wikis' && <WikisTab orgId={org.id} onToast={onToast} />}
     </div>
   )
 }
@@ -409,9 +379,7 @@ export default function OrgPage({ user, onToast }) {
     listOrgs()
       .then(data => {
         setOrgs(data)
-        if (data.length > 0 && !selectedOrgId) {
-          setSelectedOrgId(data[0].id)
-        }
+        if (data.length > 0 && !selectedOrgId) setSelectedOrgId(data[0].id)
       })
       .catch(() => onToast('Failed to load organizations', 'error'))
       .finally(() => setLoading(false))
@@ -422,55 +390,52 @@ export default function OrgPage({ user, onToast }) {
   const selectedOrg = orgs?.find(o => o.id === selectedOrgId)
 
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
-      <span className="spinner" style={{ width: 28, height: 28, borderWidth: 3 }} />
+    <div className="flex h-[60vh] items-center justify-center">
+      <div className="h-7 w-7 animate-spin rounded-full border-[3px] border-border border-t-primary" />
     </div>
   )
 
   if (!orgs?.length) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', flexDirection: 'column', gap: '0.75rem', color: 'var(--muted)' }}>
+    <div className="flex h-[60vh] flex-col items-center justify-center gap-3 text-muted-foreground">
       <IconOrg size={36} />
-      <div style={{ fontSize: '0.9rem' }}>No organizations yet.</div>
+      <p className="text-sm">No organizations yet.</p>
     </div>
   )
 
   return (
-    <div style={{ display: 'flex', height: '100%', minHeight: 0, gap: 0 }}>
+    <div className="flex h-full min-h-0 -m-4 md:-m-6">
       {/* Org sidebar */}
-      <aside style={{ width: 220, flexShrink: 0, borderRight: '1px solid var(--border)', overflowY: 'auto',
-        display: 'flex', flexDirection: 'column', padding: '0.75rem 0.5rem', gap: '0.25rem' }}>
-        <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
-          letterSpacing: '0.07em', padding: '0.25rem 0.625rem', marginBottom: '0.25rem' }}>
+      <aside className="w-52 shrink-0 border-r border-border overflow-y-auto flex flex-col p-2 gap-0.5">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground px-2.5 py-1.5 mb-1">
           Organizations
-        </div>
+        </p>
         {orgs.map(org => (
           <button
             key={org.id}
             onClick={() => setSelectedOrgId(org.id)}
-            style={{
-              width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
-              padding: '0.5rem 0.625rem', borderRadius: 6, fontSize: '0.8125rem',
-              background: selectedOrgId === org.id ? 'rgba(99,102,241,0.1)' : 'transparent',
-              color: selectedOrgId === org.id ? 'var(--accent)' : 'var(--text)',
-              border: `1px solid ${selectedOrgId === org.id ? 'rgba(99,102,241,0.25)' : 'transparent'}`,
-              cursor: 'pointer', textAlign: 'left', transition: 'all 0.12s',
-            }}>
-            <div style={{ fontWeight: selectedOrgId === org.id ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>
+            className={cn(
+              'w-full flex flex-col items-start rounded-lg px-2.5 py-2 text-sm transition-colors text-left',
+              selectedOrgId === org.id
+                ? 'bg-indigo-500/10 text-indigo-500 border border-indigo-500/20'
+                : 'text-foreground hover:bg-muted border border-transparent'
+            )}
+          >
+            <span className={cn('font-medium truncate w-full', selectedOrgId === org.id ? 'font-semibold' : '')}>
               {org.name}
-            </div>
-            <div style={{ display: 'flex', gap: '0.375rem', marginTop: '0.125rem', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.6875rem', color: 'var(--muted)' }}>{org.member_count} members</span>
+            </span>
+            <span className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-[11px] text-muted-foreground">{org.member_count} members</span>
               <RoleBadge role={org.role} />
-            </div>
+            </span>
           </button>
         ))}
       </aside>
 
       {/* Detail area */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem 2rem' }}>
+      <div className="flex-1 overflow-y-auto p-6">
         {selectedOrg
           ? <OrgDetail key={selectedOrg.id} org={selectedOrg} currentUserId={user.id} onToast={onToast} />
-          : <div style={{ color: 'var(--muted)', fontSize: '0.875rem' }}>Select an organization</div>
+          : <p className="text-sm text-muted-foreground">Select an organization</p>
         }
       </div>
     </div>

@@ -3,6 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Brush,
 } from 'recharts'
+import { Button } from '@/components/ui/button'
 
 const MAX_POINTS = 4000
 
@@ -56,7 +57,7 @@ export default function SignalChart({ signal, color }) {
 
   if (!data.length) {
     return (
-      <div className="chart-placeholder" style={{ minHeight: 250 }}>
+      <div className="flex items-center justify-center text-sm text-muted-foreground min-h-[250px]">
         No data points in this signal
       </div>
     )
@@ -67,30 +68,26 @@ export default function SignalChart({ signal, color }) {
   return (
     <div>
       {/* Stats bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '0.875rem', fontWeight: 600, color }}>
+      <div className="flex items-center gap-4 mb-3 flex-wrap">
+        <span className="text-sm font-semibold" style={{ color }}>
           {signal.name}{unit}
         </span>
-        <span style={{ fontSize: '0.75rem', color: 'var(--muted)', marginLeft: 'auto' }}>
+        <span className="text-xs text-muted-foreground ml-auto">
           {stats.samples.toLocaleString()} samples
           {data.length < stats.samples && ` (${data.length.toLocaleString()} shown)`}
         </span>
-        <button
-          className="btn-add"
-          onClick={() => setShowStats(s => !s)}
-          style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem' }}
-        >
+        <Button size="xs" variant="outline" onClick={() => setShowStats(s => !s)}>
           {showStats ? 'Hide stats' : 'Stats'}
-        </button>
+        </Button>
       </div>
 
       {showStats && (
-        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+        <div className="flex gap-3 flex-wrap mb-3">
           {[['Min', stats.min], ['Max', stats.max], ['Mean', stats.mean], ['Std dev', stats.std]].map(([label, val]) => (
-            <div key={label} className="info-chip" style={{ flex: '1 1 100px' }}>
-              <span className="label">{label}</span>
-              <span className="value" style={{ fontFamily: 'monospace', fontSize: '0.8125rem' }}>{fmt(val)}</span>
-              {signal.unit && <span style={{ fontSize: '0.6875rem', color: 'var(--muted)' }}>{signal.unit}</span>}
+            <div key={label} className="flex-1 basis-24 rounded-lg border border-border bg-muted/50 px-3 py-2">
+              <p className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide font-semibold">{label}</p>
+              <p className="text-sm font-mono font-medium mt-0.5">{fmt(val)}</p>
+              {signal.unit && <p className="text-[0.6875rem] text-muted-foreground">{signal.unit}</p>}
             </div>
           ))}
         </div>
@@ -101,13 +98,13 @@ export default function SignalChart({ signal, color }) {
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis
             dataKey="t"
-            tick={{ fill: 'var(--muted)', fontSize: 11 }}
+            tick={{ fill: 'var(--muted-foreground)', fontSize: 11 }}
             tickLine={false}
             axisLine={{ stroke: 'var(--border)' }}
-            label={{ value: 'Time (s)', position: 'insideBottomRight', offset: -4, fill: 'var(--muted)', fontSize: 11 }}
+            label={{ value: 'Time (s)', position: 'insideBottomRight', offset: -4, fill: 'var(--muted-foreground)', fontSize: 11 }}
           />
           <YAxis
-            tick={{ fill: 'var(--muted)', fontSize: 11 }}
+            tick={{ fill: 'var(--muted-foreground)', fontSize: 11 }}
             tickLine={false}
             axisLine={{ stroke: 'var(--border)' }}
             width={70}
@@ -115,17 +112,17 @@ export default function SignalChart({ signal, color }) {
           />
           <Tooltip
             contentStyle={{
-              background: 'var(--surface2)',
+              background: 'var(--card)',
               border: '1px solid var(--border)',
               borderRadius: 8,
               fontSize: '0.8125rem',
             }}
-            labelStyle={{ color: 'var(--muted)' }}
+            labelStyle={{ color: 'var(--muted-foreground)' }}
             formatter={(v) => [fmt(v) + (signal.unit ? ' ' + signal.unit : ''), signal.name]}
             labelFormatter={t => `t = ${fmt(t)} s`}
           />
           {isFinite(stats.mean) && (
-            <ReferenceLine y={stats.mean} stroke="var(--muted)" strokeDasharray="4 4" strokeWidth={1} />
+            <ReferenceLine y={stats.mean} stroke="var(--muted-foreground)" strokeDasharray="4 4" strokeWidth={1} />
           )}
           <Line
             type="linear"
@@ -140,7 +137,7 @@ export default function SignalChart({ signal, color }) {
               dataKey="t"
               height={22}
               stroke="var(--border)"
-              fill="var(--surface)"
+              fill="var(--card)"
               travellerWidth={6}
               tickFormatter={v => fmt(v)}
             />
