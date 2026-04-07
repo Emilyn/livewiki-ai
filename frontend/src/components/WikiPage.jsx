@@ -368,6 +368,7 @@ export default function WikiPage({ onToast }) {
       })
       setActiveWiki(meta)
       setActivePage(meta.pages[0] || null)
+      setSelectedTemplateId('')
       setView('wiki')
       const regen = meta.regenerated_pages
       if (Array.isArray(regen) && regen.length === 0) onToast('Already up to date — no changes detected')
@@ -688,7 +689,7 @@ export default function WikiPage({ onToast }) {
                       )}
                       onClick={() => {
                         if (isExpanded) { setExpandedRepo(null) }
-                        else { setExpandedRepo(r.id); setBranchInput(r.default_branch || 'main') }
+                        else { setExpandedRepo(r.id); setBranchInput(r.default_branch || 'main'); setSelectedTemplateId('') }
                       }}
                     >
                       <span className="text-muted-foreground shrink-0">
