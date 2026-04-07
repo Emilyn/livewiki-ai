@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import mermaid from 'mermaid'
+import DOMPurify from 'dompurify'
 import {
   getGitHubStatus,
   listGitHubRepos,
@@ -10,10 +11,15 @@ import {
   listWikis, getWikiPage, generateWikiV2, deleteWikiV2, wikiChat,
   listTemplates,
 } from '../api'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Card, CardContent } from '@/components/ui/card'
+import { cn } from '@/lib/utils'
 
 mermaid.initialize({ startOnLoad: false, theme: 'dark', darkMode: true })
 
-// ── Icons ─────────────────────────────────────────────────────────────────────
 function GitHubIcon({ size = 16 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
@@ -54,20 +60,12 @@ function IconCollapse({ size = 14 }) {
 }
 
 // ── Chat panel ────────────────────────────────────────────────────────────────
-function ChatPanel({ wikiSlug, onClose, expanded = false, onToggleExpand }) {
-  const [messages, setMessages] = useState([])  // [{role, content}]
-  const [input, setInput]       = useState('')
-  const [loading, setLoading]   = useState(false)
-  const bottomRef               = useRef(null)
-  const inputRef                = useRef(null)
+function ChatPanel({ wikiSlug, onClose, expanded = false, onToggleExpand, messages, setMessages, input, setInput, loading, setLoading }) {
+  const bottomRef = useRef(null)
+  const inputRef  = useRef(null)
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
-
-  useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
+  useEffect(() => { inputRef.current?.focus() }, [])
 
   const handleSend = async () => {
     const q = input.trim()
@@ -77,7 +75,6 @@ function ChatPanel({ wikiSlug, onClose, expanded = false, onToggleExpand }) {
     setInput('')
     setLoading(true)
     try {
-      // Pass history excluding the last user message (backend will append it)
       const history = newMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
       const { answer } = await wikiChat(wikiSlug, q, history)
       setMessages(m => [...m, { role: 'assistant', content: answer }])
@@ -93,47 +90,44 @@ function ChatPanel({ wikiSlug, onClose, expanded = false, onToggleExpand }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      {/* Chat header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        <IconChat size={15} />
-        <span style={{ fontWeight: 600, fontSize: '0.9375rem', flex: 1 }}>Ask AI</span>
+    <div className="flex flex-col h-full min-h-0">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
+        <IconChat size={14} />
+        <span className="font-semibold text-sm flex-1">Ask AI</span>
         {onToggleExpand && (
-          <button className="btn-icon" onClick={onToggleExpand} title={expanded ? 'Collapse' : 'Expand'} style={{ opacity: 0.6 }}>
+          <Button variant="ghost" size="icon-xs" onClick={onToggleExpand} title={expanded ? 'Collapse' : 'Expand'}>
             {expanded ? <IconCollapse size={13} /> : <IconExpand size={13} />}
-          </button>
+          </Button>
         )}
-        <button className="btn-icon" onClick={onClose} title="Close chat" style={{ opacity: 0.6 }}>✕</button>
+        <Button variant="ghost" size="icon-xs" onClick={onClose} title="Close chat">✕</Button>
       </div>
 
       {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', minHeight: 0 }}>
+      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4 min-h-0">
         {messages.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--muted)', fontSize: '0.875rem' }}>
-            <div style={{ marginBottom: '0.75rem', fontSize: '1.5rem' }}>💬</div>
-            <div style={{ fontWeight: 500, marginBottom: '0.375rem' }}>Ask anything about this repo</div>
-            <div style={{ fontSize: '0.8125rem' }}>How does auth work? What does X module do?</div>
+          <div className="text-center py-8 text-muted-foreground">
+            <div className="text-2xl mb-3">💬</div>
+            <p className="font-medium text-sm mb-1">Ask anything about this repo</p>
+            <p className="text-xs">How does auth work? What does X module do?</p>
           </div>
         )}
         {messages.map((msg, i) => (
-          <div key={i} style={{ display: 'flex', gap: '0.625rem', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row', alignItems: 'flex-start' }}>
-            <div style={{
-              width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-              background: msg.role === 'user' ? 'var(--accent)' : 'var(--surface2)',
-              border: '1px solid var(--border)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '0.7rem', fontWeight: 700, color: msg.role === 'user' ? 'white' : 'var(--muted)',
-            }}>
+          <div key={i} className={cn('flex gap-2.5 items-start', msg.role === 'user' && 'flex-row-reverse')}>
+            <div className={cn(
+              'h-7 w-7 rounded-full shrink-0 flex items-center justify-center text-xs font-bold border border-border',
+              msg.role === 'user' ? 'bg-sky-400 text-white border-sky-400' : 'bg-muted text-muted-foreground'
+            )}>
               {msg.role === 'user' ? 'U' : 'AI'}
             </div>
-            <div style={{
-              maxWidth: '82%', padding: '0.625rem 0.875rem', borderRadius: 10,
-              background: msg.role === 'user' ? 'rgba(99,102,241,0.12)' : 'var(--surface2)',
-              border: `1px solid ${msg.role === 'user' ? 'rgba(99,102,241,0.25)' : 'var(--border)'}`,
-              fontSize: '0.875rem', lineHeight: 1.6,
-            }}>
+            <div className={cn(
+              'max-w-[82%] rounded-xl px-3 py-2.5 text-sm border',
+              msg.role === 'user'
+                ? 'bg-sky-400/10 border-sky-400/20'
+                : 'bg-muted border-border'
+            )}>
               {msg.role === 'assistant' ? (
-                <div className="md-body" style={{ fontSize: '0.875rem' }}>
+                <div className="md-body text-sm">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                 </div>
               ) : (
@@ -143,11 +137,11 @@ function ChatPanel({ wikiSlug, onClose, expanded = false, onToggleExpand }) {
           </div>
         ))}
         {loading && (
-          <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start' }}>
-            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--surface2)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, color: 'var(--muted)', flexShrink: 0 }}>AI</div>
-            <div style={{ padding: '0.75rem 1rem', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+          <div className="flex gap-2.5 items-start">
+            <div className="h-7 w-7 rounded-full bg-muted border border-border flex items-center justify-center text-xs font-bold text-muted-foreground shrink-0">AI</div>
+            <div className="bg-muted border border-border rounded-xl px-3 py-3 flex gap-1.5 items-center">
               {[0,1,2].map(i => (
-                <div key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--muted)', animation: `bounce 1.2s ${i * 0.2}s infinite` }} />
+                <div key={i} className="h-1.5 w-1.5 rounded-full bg-muted-foreground" style={{ animation: `chat-bounce 1.2s ${i * 0.2}s infinite` }} />
               ))}
             </div>
           </div>
@@ -156,8 +150,8 @@ function ChatPanel({ wikiSlug, onClose, expanded = false, onToggleExpand }) {
       </div>
 
       {/* Input */}
-      <div style={{ padding: '0.875rem 1.25rem', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+      <div className="px-4 py-3 border-t border-border shrink-0">
+        <div className="flex gap-2">
           <textarea
             ref={inputRef}
             value={input}
@@ -166,33 +160,18 @@ function ChatPanel({ wikiSlug, onClose, expanded = false, onToggleExpand }) {
             placeholder="Ask a question… (Enter to send)"
             rows={2}
             disabled={loading}
-            style={{
-              flex: 1, resize: 'none', background: 'var(--surface2)', border: '1px solid var(--border)',
-              borderRadius: 8, color: 'var(--text)', padding: '0.5rem 0.75rem',
-              fontFamily: 'inherit', fontSize: '0.875rem', outline: 'none', lineHeight: 1.5,
-              transition: 'border-color 0.15s',
-            }}
-            onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-            onBlur={e => e.target.style.borderColor = 'var(--border)'}
+            className="flex-1 resize-none rounded-lg border border-input bg-muted/50 px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/30 disabled:opacity-50 dark:bg-input/30"
           />
-          <button
-            className="btn-primary"
+          <Button
             onClick={handleSend}
             disabled={!input.trim() || loading}
-            style={{ padding: '0 0.875rem', display: 'flex', alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch', borderRadius: 8 }}
+            className="self-stretch px-3"
           >
-            <IconSend size={15} />
-          </button>
+            <IconSend size={14} />
+          </Button>
         </div>
-        <p style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '0.375rem' }}>Shift+Enter for new line</p>
+        <p className="text-[11px] text-muted-foreground mt-1.5">Shift+Enter for new line</p>
       </div>
-
-      <style>{`
-        @keyframes bounce {
-          0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
-          40% { transform: translateY(-6px); opacity: 1; }
-        }
-      `}</style>
     </div>
   )
 }
@@ -204,33 +183,31 @@ function MermaidBlock({ code }) {
   useEffect(() => {
     const id = 'mermaid-' + Math.random().toString(36).slice(2)
     mermaid.render(id, code)
-      .then(({ svg }) => setSvg(svg))
+      .then(({ svg }) => setSvg(DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, ADD_TAGS: ['style', 'foreignObject', 'div', 'span'], ADD_ATTR: ['xmlns', 'dominant-baseline', 'requiredFeatures'] })))
       .catch(() => setError('Invalid diagram syntax'))
       .finally(() => {
-        // Mermaid v10+ leaves a temp element in <body> on error — remove it
         document.getElementById(`d${id}`)?.remove()
         document.getElementById(id)?.remove()
       })
   }, [code])
   if (error) return (
-    <div style={{ padding: '0.625rem 0.875rem', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.8125rem', color: 'var(--muted)', fontStyle: 'italic' }}>
+    <div className="rounded-lg border border-border bg-muted px-3 py-2 text-xs text-muted-foreground italic">
       ⚠ Mermaid diagram could not be rendered
     </div>
   )
   if (!svg) return null
-  return <div style={{ overflowX: 'auto', margin: '1rem 0', textAlign: 'center' }} dangerouslySetInnerHTML={{ __html: svg }} />
+  return <div className="overflow-x-auto my-4 text-center" dangerouslySetInnerHTML={{ __html: svg }} />
 }
 
 function CodeBlock({ className, children }) {
   const code = String(children).trimEnd()
-  // Inline code has no language class and no newlines
   if (!className && !code.includes('\n')) return <code>{children}</code>
   const lang = (className || '').replace('language-', '')
   if (lang === 'mermaid') return <MermaidBlock code={code} />
   return <pre><code className={className}>{code}</code></pre>
 }
 
-// ── Progress steps ────────────────────────────────────────────────────────────
+// ── Generating overlay ────────────────────────────────────────────────────────
 const DEFAULT_PAGE_TITLES = ['Overview', 'Architecture', 'Project Structure', 'Core Modules', 'Data Flow']
 
 function GeneratingOverlay({ repo, pages = DEFAULT_PAGE_TITLES }) {
@@ -240,29 +217,33 @@ function GeneratingOverlay({ repo, pages = DEFAULT_PAGE_TITLES }) {
     const interval = setInterval(() => setStep(s => Math.min(s + 1, pages.length - 1)), 12000)
     return () => clearInterval(interval)
   }, [pages])
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 400, gap: '1.5rem', textAlign: 'center' }}>
-      <div style={{ width: 48, height: 48, background: 'rgba(99,102,241,0.15)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <span className="spinner" style={{ width: 24, height: 24, borderWidth: 3 }} />
+    <div className="flex flex-col items-center justify-center min-h-[400px] gap-6 text-center p-6">
+      <div className="h-12 w-12 rounded-full bg-sky-400/15 flex items-center justify-center">
+        <div className="h-6 w-6 animate-spin rounded-full border-[3px] border-border border-t-sky-400" />
       </div>
       <div>
-        <div style={{ fontWeight: 600, fontSize: '1rem', marginBottom: '0.375rem' }}>Generating wiki for {repo}</div>
-        <div style={{ fontSize: '0.8125rem', color: 'var(--muted)' }}>Analyzing codebase and writing documentation…</div>
+        <p className="font-semibold text-base mb-1">Generating wiki for {repo}</p>
+        <p className="text-sm text-muted-foreground">Analyzing codebase and writing documentation…</p>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', width: '100%', maxWidth: 320 }}>
+      <div className="flex flex-col gap-2.5 w-full max-w-xs">
         {pages.map((title, i) => (
-          <div key={title} style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', fontSize: '0.8125rem' }}>
-            <div style={{
-              width: 20, height: 20, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: i < step ? 'var(--success)' : i === step ? 'var(--accent)' : 'var(--surface2)',
-              border: `1px solid ${i < step ? 'var(--success)' : i === step ? 'var(--accent)' : 'var(--border)'}`,
-              transition: 'all 0.3s',
-              fontSize: '0.625rem', color: i <= step ? 'white' : 'var(--muted)',
-            }}>
+          <div key={title} className="flex items-center gap-2.5 text-sm">
+            <div className={cn(
+              'h-5 w-5 rounded-full shrink-0 flex items-center justify-center text-[10px] font-bold transition-all border',
+              i < step ? 'bg-green-500 border-green-500 text-white'
+                : i === step ? 'bg-sky-400 border-sky-400 text-white'
+                : 'bg-muted border-border text-muted-foreground'
+            )}>
               {i < step ? '✓' : i + 1}
             </div>
-            <span style={{ color: i <= step ? 'var(--text)' : 'var(--muted)', transition: 'color 0.3s' }}>{title}</span>
-            {i === step && <span className="spinner" style={{ width: 12, height: 12, borderWidth: 2, marginLeft: 'auto' }} />}
+            <span className={cn('transition-colors', i <= step ? 'text-foreground' : 'text-muted-foreground')}>
+              {title}
+            </span>
+            {i === step && (
+              <div className="h-3 w-3 ml-auto animate-spin rounded-full border-2 border-border border-t-sky-400" />
+            )}
           </div>
         ))}
       </div>
@@ -286,16 +267,23 @@ function WikiPageViewer({ wikiSlug, page }) {
   }, [wikiSlug, page?.id])
 
   if (!page) return (
-    <div className="viewer-placeholder">
-      <IconBook size={40} />
-      <div><div style={{ fontWeight: 600 }}>Select a page</div><div style={{ fontSize: '0.8125rem', color: 'var(--muted)', marginTop: '0.25rem' }}>Choose a page from the sidebar</div></div>
+    <div className="flex flex-col items-center justify-center h-full min-h-[300px] gap-3 text-muted-foreground">
+      <span className="opacity-50"><IconBook size={36} /></span>
+      <div className="text-center">
+        <p className="font-semibold text-sm">Select a page</p>
+        <p className="text-xs mt-1">Choose a page from the sidebar</p>
+      </div>
     </div>
   )
 
-  if (loading) return <div className="loading-overlay"><span className="spinner" /> Loading…</div>
+  if (loading) return (
+    <div className="flex items-center justify-center gap-2 p-8 text-sm text-muted-foreground">
+      <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-primary" /> Loading…
+    </div>
+  )
 
   return (
-    <div style={{ padding: '1.5rem', overflowY: 'auto' }}>
+    <div className="p-6 overflow-y-auto">
       <div className="md-body">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
           {content || ''}
@@ -307,37 +295,38 @@ function WikiPageViewer({ wikiSlug, page }) {
 
 // ── Main WikiPage ─────────────────────────────────────────────────────────────
 export default function WikiPage({ onToast }) {
-  // GitHub + GitLab + repo state
   const [ghStatus, setGhStatus]     = useState(null)
   const [glStatus, setGlStatus]     = useState(null)
   const [repos, setRepos]           = useState([])
   const [repoSearch, setRepoSearch] = useState('')
 
-  // Wiki list
   const [wikis, setWikis]           = useState([])
   const [wikisLoaded, setWikisLoaded] = useState(false)
 
-  // Active wiki
-  const [activeWiki, setActiveWiki] = useState(null)   // WikiMeta
-  const [activePage, setActivePage] = useState(null)   // WikiPageMeta
+  const [activeWiki, setActiveWiki] = useState(null)
+  const [activePage, setActivePage] = useState(null)
   const [generating, setGenerating] = useState(false)
   const [genRepo, setGenRepo]       = useState('')
   const [genPages, setGenPages]     = useState(DEFAULT_PAGE_TITLES)
 
-  // UI state
-  const [view, setView]             = useState('list') // 'list' | 'new' | 'wiki'
+  const [view, setView]             = useState('list')
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [showChat, setShowChat]       = useState(false)
   const [chatExpanded, setChatExpanded] = useState(false)
+  const [chatMessages, setChatMessages] = useState([])
+  const [chatInput, setChatInput]       = useState('')
+  const [chatLoading, setChatLoading]   = useState(false)
   const [expandedRepo, setExpandedRepo] = useState(null)
   const [branchInput, setBranchInput]   = useState('')
   const [pageSearch, setPageSearch]     = useState('')
   const [copiedShare, setCopiedShare]   = useState(false)
   const [templates, setTemplates] = useState([])
-  const [selectedTemplateId, setSelectedTemplateId] = useState('')  // '' = default/wiki.json
+  const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [showRegenModal, setShowRegenModal] = useState(false)
   const [regenBranch, setRegenBranch] = useState('')
   const [regenTemplateId, setRegenTemplateId] = useState('')
+
+  const selectClass = "h-7 rounded border border-input bg-background px-2 text-xs outline-none focus:border-ring dark:bg-input/30"
 
   useEffect(() => {
     const ghPromise = getGitHubStatus()
@@ -351,9 +340,7 @@ export default function WikiPage({ onToast }) {
       const fetches = []
       if (gh.connected) fetches.push(listGitHubRepos().then(r => r.map(x => ({ ...x, source: 'github' }))).catch(() => []))
       if (gl.connected) fetches.push(listGitLabRepos().catch(() => []))
-      Promise.all(fetches).then(results => {
-        setRepos(results.flat())
-      })
+      Promise.all(fetches).then(results => setRepos(results.flat()))
     })
 
     listWikis()
@@ -363,7 +350,6 @@ export default function WikiPage({ onToast }) {
   }, [])
 
   const handleGenerate = useCallback(async (repo, branch, templateId = '') => {
-    // Resolve page titles for the progress overlay
     if (templateId) {
       const tpl = templates.find(t => t.id === templateId)
       setGenPages(tpl ? tpl.pages.map(p => p.title) : DEFAULT_PAGE_TITLES)
@@ -384,20 +370,16 @@ export default function WikiPage({ onToast }) {
       setActivePage(meta.pages[0] || null)
       setView('wiki')
       const regen = meta.regenerated_pages
-      if (Array.isArray(regen) && regen.length === 0) {
-        onToast('Already up to date — no changes detected')
-      } else if (Array.isArray(regen) && regen.length < meta.pages.length) {
-        onToast(`Updated ${regen.length} page${regen.length !== 1 ? 's' : ''}: ${regen.join(', ')}`)
-      } else {
-        onToast(`Wiki generated for ${repo.full_name}`)
-      }
+      if (Array.isArray(regen) && regen.length === 0) onToast('Already up to date — no changes detected')
+      else if (Array.isArray(regen) && regen.length < meta.pages.length) onToast(`Updated ${regen.length} page${regen.length !== 1 ? 's' : ''}: ${regen.join(', ')}`)
+      else onToast(`Wiki generated for ${repo.full_name}`)
     } catch (e) {
       onToast(e?.response?.data?.error || 'Generation failed', 'error')
       setView('list')
     } finally {
       setGenerating(false)
     }
-  }, [onToast])
+  }, [onToast, templates])
 
   const handleOpenWiki = (wiki) => {
     setActiveWiki(wiki)
@@ -415,90 +397,91 @@ export default function WikiPage({ onToast }) {
     } catch { onToast('Delete failed', 'error') }
   }
 
-  // ── Not connected ───────────────────────────────────────────────────────────
-  if (!ghStatus || !glStatus) return <div className="loading-overlay"><span className="spinner" /></div>
+  // ── Not connected ──────────────────────────────────────────────────────────
+  if (!ghStatus || !glStatus) return (
+    <div className="flex items-center justify-center h-40">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-primary" />
+    </div>
+  )
 
   const anyConnected = ghStatus.connected || glStatus.connected
   if (!anyConnected) {
     return (
-      <div style={{ maxWidth: 480 }}>
-        <div className="card">
-          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', padding: '2.5rem 1.5rem', textAlign: 'center' }}>
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <GitHubIcon size={36} />
-              <GitLabIcon size={36} />
-            </div>
-            <div>
-              <h3 style={{ marginBottom: '0.5rem' }}>Living Wiki</h3>
-              <p style={{ color: 'var(--muted)', fontSize: '0.875rem' }}>
-                Connect your GitHub or GitLab account and AI provider in <strong>Settings</strong>, then come back here to auto-generate wiki docs from your repos.
-              </p>
-            </div>
+      <Card className="max-w-md">
+        <CardContent className="flex flex-col items-center gap-4 py-10 text-center">
+          <div className="flex gap-3">
+            <GitHubIcon size={32} />
+            <GitLabIcon size={32} />
           </div>
-        </div>
-      </div>
+          <div>
+            <h3 className="font-semibold text-base mb-1.5">Living Wiki</h3>
+            <p className="text-sm text-muted-foreground">
+              Connect your GitHub or GitLab account and AI provider in <strong>Settings</strong>, then come back here to auto-generate wiki docs from your repos.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     )
   }
 
-  // ── Generating overlay ──────────────────────────────────────────────────────
+  // ── Generating overlay ─────────────────────────────────────────────────────
   if (view === 'generating') {
     return (
-      <div className="card" style={{ maxWidth: 560 }}>
-        <div className="card-body">
+      <Card className="max-w-lg">
+        <CardContent className="p-0">
           <GeneratingOverlay repo={genRepo} pages={genPages} />
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     )
   }
 
-  // ── Wiki viewer ─────────────────────────────────────────────────────────────
+  // ── Wiki viewer ────────────────────────────────────────────────────────────
   if (view === 'wiki' && activeWiki) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0', height: '100%' }}>
+      <div className="flex flex-col gap-4 h-full">
         {/* Wiki header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-          <button className="btn-secondary" style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }} onClick={() => setView('list')}>
-            ← All wikis
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0 }}>
-            {activeWiki.source === 'gitlab' ? <GitLabIcon size={14} /> : <GitHubIcon size={14} />}
-            <span style={{ fontWeight: 600, fontSize: '0.9375rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {activeWiki.repo}
-            </span>
-            <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={() => setView('list')}>← All wikis</Button>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            {activeWiki.source === 'gitlab' ? <GitLabIcon size={13} /> : <GitHubIcon size={13} />}
+            <span className="font-semibold text-sm truncate">{activeWiki.repo}</span>
+            <div className="flex gap-1 flex-wrap">
               {activeWiki.stack?.map(s => (
-                <span key={s} style={{ fontSize: '0.6875rem', background: 'rgba(99,102,241,0.1)', color: 'var(--accent)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 4, padding: '0.1rem 0.4rem' }}>{s}</span>
+                <span key={s} className="text-[11px] bg-sky-400/10 text-sky-400 border border-sky-400/20 rounded px-1.5 py-0.5">{s}</span>
               ))}
               {activeWiki.has_custom_config && (
-                <span style={{ fontSize: '0.6875rem', background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 4, padding: '0.1rem 0.4rem' }}>wiki.json</span>
+                <span className="text-[11px] bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 rounded px-1.5 py-0.5">wiki.json</span>
               )}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
+          <div className="flex gap-1.5 shrink-0 flex-wrap">
             {activeWiki.share_token && (
-              <button
-                className="btn-secondary"
-                style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.375rem', color: copiedShare ? 'var(--success)' : undefined }}
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn('flex items-center gap-1.5', copiedShare && 'text-green-500')}
                 onClick={() => {
                   navigator.clipboard.writeText(`${window.location.origin}/share/${activeWiki.share_token}`)
                   setCopiedShare(true)
                   setTimeout(() => setCopiedShare(false), 2000)
                 }}
               >
-                <svg width={12} height={12} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M9 17H7A5 5 0 017 7h2"/><path d="M15 7h2a5 5 0 110 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M9 17H7A5 5 0 017 7h2"/><path d="M15 7h2a5 5 0 110 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
                 {copiedShare ? 'Copied!' : 'Share'}
-              </button>
+              </Button>
             )}
-            <button
-              className={showChat ? 'btn-primary' : 'btn-secondary'}
-              style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}
+            <Button
+              variant={showChat ? 'default' : 'outline'}
+              size="sm"
+              className="flex items-center gap-1.5"
               onClick={() => { setShowChat(v => !v); setChatExpanded(false) }}
             >
               <IconChat size={12} /> {showChat ? 'Close Chat' : 'Ask AI'}
-            </button>
-            <button
-              className="btn-secondary"
-              style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-1.5"
               onClick={() => {
                 setRegenBranch(activeWiki.branch)
                 setRegenTemplateId(activeWiki.template_id || '')
@@ -506,27 +489,31 @@ export default function WikiPage({ onToast }) {
               }}
             >
               <IconRefresh size={12} /> Regenerate
-            </button>
-            <button
-              className="btn-danger-sm"
-              style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              className="flex items-center gap-1.5"
               onClick={() => setConfirmDelete(activeWiki)}
             >
               <IconTrash size={12} /> Delete
-            </button>
+            </Button>
           </div>
         </div>
 
         {/* Wiki layout */}
-        <div style={{ display: 'grid', gridTemplateColumns: showChat && !chatExpanded ? '200px 1fr 380px' : '200px 1fr', gap: '1rem', alignItems: 'start' }}>
+        <div className={cn(
+          'grid gap-4 items-start',
+          showChat && !chatExpanded ? 'grid-cols-[180px_1fr_340px]' : 'grid-cols-[180px_1fr]'
+        )}>
           {/* Page sidebar */}
-          <div className="card">
-            <div className="card-body" style={{ padding: '0.5rem' }}>
-              <input
+          <Card>
+            <div className="p-2 space-y-0.5">
+              <Input
                 placeholder="Search pages…"
                 value={pageSearch}
                 onChange={e => setPageSearch(e.target.value)}
-                style={{ width: '100%', fontSize: '0.8125rem', padding: '0.3rem 0.55rem', marginBottom: '0.375rem' }}
+                className="h-7 text-xs mb-2"
               />
               {activeWiki.pages
                 .filter(p => p.title.toLowerCase().includes(pageSearch.toLowerCase()))
@@ -537,210 +524,221 @@ export default function WikiPage({ onToast }) {
                     <button
                       key={page.id}
                       onClick={() => { setActivePage(page); setShowChat(false) }}
-                      style={{
-                        width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem',
-                        padding: '0.5rem 0.625rem', borderRadius: 6, fontSize: '0.8125rem',
-                        background: isActive ? 'rgba(99,102,241,0.1)' : 'transparent',
-                        color: isActive ? 'var(--accent)' : 'var(--text)',
-                        border: `1px solid ${isActive ? 'rgba(99,102,241,0.25)' : 'transparent'}`,
-                        cursor: 'pointer', textAlign: 'left', fontWeight: isActive ? 600 : 400,
-                        transition: 'all 0.12s',
-                      }}
-                      onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--surface2)' }}
-                      onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
-                    >
-                      <IconBook size={13} />
-                      <span style={{ flex: 1, textAlign: 'left' }}>{page.title}</span>
-                      {wasUpdated && (
-                        <span title="Updated in last regen" style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981', flexShrink: 0 }} />
+                      className={cn(
+                        'flex items-center gap-2 w-full rounded-lg px-2.5 py-2 text-xs transition-colors text-left',
+                        isActive
+                          ? 'bg-sky-400/10 text-sky-400 border border-sky-400/20 font-semibold'
+                          : 'text-foreground hover:bg-muted border border-transparent'
                       )}
+                    >
+                      <IconBook size={12} />
+                      <span className="flex-1">{page.title}</span>
+                      {wasUpdated && <span className="h-1.5 w-1.5 rounded-full bg-green-500 shrink-0" title="Updated" />}
                     </button>
                   )
                 })
               }
-              <div style={{ borderTop: '1px solid var(--border)', marginTop: '0.375rem', paddingTop: '0.375rem' }}>
+              <div className="border-t border-border mt-1 pt-1">
                 <button
                   onClick={() => { setShowChat(v => !v); setChatExpanded(false) }}
-                  style={{
-                    width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem',
-                    padding: '0.5rem 0.625rem', borderRadius: 6, fontSize: '0.8125rem',
-                    background: showChat ? 'rgba(99,102,241,0.1)' : 'transparent',
-                    color: showChat ? 'var(--accent)' : 'var(--muted)',
-                    border: `1px solid ${showChat ? 'rgba(99,102,241,0.25)' : 'transparent'}`,
-                    cursor: 'pointer', textAlign: 'left', fontWeight: showChat ? 600 : 400,
-                    transition: 'all 0.12s',
-                  }}
+                  className={cn(
+                    'flex items-center gap-2 w-full rounded-lg px-2.5 py-2 text-xs transition-colors text-left',
+                    showChat
+                      ? 'bg-sky-400/10 text-sky-400 border border-sky-400/20 font-semibold'
+                      : 'text-muted-foreground hover:bg-muted border border-transparent hover:text-foreground'
+                  )}
                 >
-                  <IconChat size={13} />
-                  Ask AI
+                  <IconChat size={12} /> Ask AI
                 </button>
               </div>
             </div>
-          </div>
+          </Card>
 
-          {/* Page content — or expanded chat */}
-          <div className="card" style={{ minHeight: 500, display: 'flex', flexDirection: 'column', ...(showChat && chatExpanded ? { position: 'sticky', top: '1rem', maxHeight: 'calc(100vh - 8rem)', overflow: 'hidden' } : {}) }}>
+          {/* Main content or expanded chat */}
+          <Card className={cn(
+            'min-h-[500px] flex flex-col',
+            showChat && chatExpanded && 'sticky top-4 max-h-[calc(100vh-8rem)] overflow-hidden'
+          )}>
             {showChat && chatExpanded
               ? <ChatPanel
                   wikiSlug={activeWiki.repo_slug}
-                  onClose={() => { setShowChat(false); setChatExpanded(false) }}
+                  onClose={() => { setShowChat(false); setChatExpanded(false); setChatMessages([]); setChatInput('') }}
                   expanded
                   onToggleExpand={() => setChatExpanded(false)}
+                  messages={chatMessages} setMessages={setChatMessages}
+                  input={chatInput} setInput={setChatInput}
+                  loading={chatLoading} setLoading={setChatLoading}
                 />
               : <WikiPageViewer wikiSlug={activeWiki.repo_slug} page={activePage} />
             }
-          </div>
+          </Card>
 
-          {/* Side chat panel — only when not expanded */}
+          {/* Side chat panel */}
           {showChat && !chatExpanded && (
-            <div className="card" style={{ minHeight: 500, display: 'flex', flexDirection: 'column', position: 'sticky', top: '1rem', maxHeight: 'calc(100vh - 8rem)', overflow: 'hidden' }}>
+            <Card className="min-h-[500px] flex flex-col sticky top-4 max-h-[calc(100vh-8rem)] overflow-hidden">
               <ChatPanel
                 wikiSlug={activeWiki.repo_slug}
-                onClose={() => setShowChat(false)}
+                onClose={() => { setShowChat(false); setChatMessages([]); setChatInput('') }}
                 expanded={false}
                 onToggleExpand={() => setChatExpanded(true)}
+                messages={chatMessages} setMessages={setChatMessages}
+                input={chatInput} setInput={setChatInput}
+                loading={chatLoading} setLoading={setChatLoading}
               />
-            </div>
+            </Card>
           )}
         </div>
 
         {/* Regen modal */}
-        {showRegenModal && (
-          <div className="modal-backdrop" onClick={() => setShowRegenModal(false)}>
-            <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
-              <h3 style={{ marginBottom: '1rem' }}>Regenerate wiki</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.25rem' }}>
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <label style={{ fontSize: '0.8125rem', color: 'var(--muted)', minWidth: 70, flexShrink: 0 }}>Branch:</label>
-                  <input value={regenBranch} onChange={e => setRegenBranch(e.target.value)} style={{ flex: 1, fontSize: '0.8125rem' }} />
+        <Dialog open={showRegenModal} onOpenChange={open => !open && setShowRegenModal(false)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Regenerate wiki</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div className="flex items-center gap-3">
+                <label className="text-sm text-muted-foreground w-20 shrink-0">Branch:</label>
+                <Input value={regenBranch} onChange={e => setRegenBranch(e.target.value)} className="flex-1 h-8" />
+              </div>
+              {templates.length > 0 && (
+                <div className="flex items-center gap-3">
+                  <label className="text-sm text-muted-foreground w-20 shrink-0">Template:</label>
+                  <select className={cn(selectClass, 'flex-1 h-8')} value={regenTemplateId} onChange={e => setRegenTemplateId(e.target.value)}>
+                    <option value="">Default (5 pages)</option>
+                    {templates.map(t => <option key={t.id} value={t.id}>{t.name} ({t.pages?.length || 0} pages)</option>)}
+                  </select>
                 </div>
-                {templates.length > 0 && (
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <label style={{ fontSize: '0.8125rem', color: 'var(--muted)', minWidth: 70, flexShrink: 0 }}>Template:</label>
-                    <select value={regenTemplateId} onChange={e => setRegenTemplateId(e.target.value)} style={{ flex: 1, fontSize: '0.8125rem' }}>
-                      <option value="">Default (5 pages)</option>
-                      {templates.map(t => <option key={t.id} value={t.id}>{t.name} ({t.pages?.length || 0} pages)</option>)}
-                    </select>
-                  </div>
-                )}
-              </div>
-              <div className="modal-actions">
-                <button className="btn-secondary" onClick={() => setShowRegenModal(false)}>Cancel</button>
-                <button
-                  className="btn-primary"
-                  onClick={() => {
-                    setShowRegenModal(false)
-                    const repo = repos.find(r => r.full_name === activeWiki.repo && (r.source || 'github') === (activeWiki.source || 'github'))
-                      || repos.find(r => r.full_name === activeWiki.repo)
-                    if (repo) handleGenerate(repo, regenBranch, regenTemplateId)
-                    else handleGenerate({ full_name: activeWiki.repo, default_branch: activeWiki.branch, source: activeWiki.source || 'github' }, regenBranch, regenTemplateId)
-                  }}
-                >
-                  Regenerate
-                </button>
-              </div>
+              )}
             </div>
-          </div>
-        )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowRegenModal(false)}>Cancel</Button>
+              <Button onClick={() => {
+                setShowRegenModal(false)
+                const repo = repos.find(r => r.full_name === activeWiki.repo && (r.source || 'github') === (activeWiki.source || 'github'))
+                  || repos.find(r => r.full_name === activeWiki.repo)
+                if (repo) handleGenerate(repo, regenBranch, regenTemplateId)
+                else handleGenerate({ full_name: activeWiki.repo, default_branch: activeWiki.branch, source: activeWiki.source || 'github' }, regenBranch, regenTemplateId)
+              }}>
+                Regenerate
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Delete confirm modal */}
-        {confirmDelete && (
-          <div className="modal-backdrop">
-            <div className="modal">
-              <div className="modal-icon"><IconTrash size={20} /></div>
-              <h3>Delete wiki?</h3>
-              <p>This will permanently delete the wiki for <strong>{confirmDelete.repo}</strong>.</p>
-              <div className="modal-actions">
-                <button className="btn-secondary" onClick={() => setConfirmDelete(null)}>Cancel</button>
-                <button className="btn-danger" onClick={() => handleDeleteWiki(confirmDelete)}>Delete</button>
-              </div>
-            </div>
-          </div>
-        )}
+        <Dialog open={!!confirmDelete} onOpenChange={open => !open && setConfirmDelete(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <span className="text-destructive"><IconTrash size={16} /></span>
+                Delete wiki?
+              </DialogTitle>
+              <DialogDescription>
+                This will permanently delete the wiki for <strong>{confirmDelete?.repo}</strong>.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+              <Button variant="destructive" onClick={() => confirmDelete && handleDeleteWiki(confirmDelete)}>Delete</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }
 
-  // ── Repo picker (new wiki) ──────────────────────────────────────────────────
+  // ── Repo picker ────────────────────────────────────────────────────────────
   if (view === 'new') {
     const filtered = repos.filter(r =>
       r.full_name.toLowerCase().includes(repoSearch.toLowerCase()) ||
       (r.description || '').toLowerCase().includes(repoSearch.toLowerCase())
     )
     return (
-      <div style={{ maxWidth: 600 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-          <button className="btn-secondary" style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }} onClick={() => setView('list')}>← Back</button>
-          <h3 style={{ fontSize: '0.9375rem' }}>Select a repository to document</h3>
+      <div className="max-w-xl">
+        <div className="flex items-center gap-3 mb-4">
+          <Button variant="outline" size="sm" onClick={() => setView('list')}>← Back</Button>
+          <h3 className="text-sm font-semibold">Select a repository to document</h3>
         </div>
-        <div className="card">
-          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <input
+        <Card>
+          <div className="p-4 space-y-3">
+            <Input
               placeholder="Search repositories…"
               value={repoSearch}
               onChange={e => setRepoSearch(e.target.value)}
-              style={{ width: '100%' }}
               autoFocus
             />
-            <div style={{ maxHeight: 420, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              {filtered.length === 0 && <div className="empty-state">No repositories found.</div>}
+            <div className="max-h-[420px] overflow-y-auto flex flex-col gap-1">
+              {filtered.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-6">No repositories found.</p>
+              )}
               {filtered.map(r => {
                 const isExpanded = expandedRepo === r.id
                 return (
-                  <div key={r.id} style={{ borderRadius: 8, border: `1px solid ${isExpanded ? 'rgba(99,102,241,0.3)' : 'transparent'}`, transition: 'border-color 0.12s' }}>
+                  <div
+                    key={r.id}
+                    className={cn(
+                      'rounded-lg border transition-colors',
+                      isExpanded ? 'border-sky-400/30' : 'border-transparent'
+                    )}
+                  >
                     <div
-                      className="file-item"
-                      style={{ borderRadius: isExpanded ? '8px 8px 0 0' : 8 }}
+                      className={cn(
+                        'flex items-center gap-2.5 rounded-lg px-3 py-2.5 cursor-pointer transition-colors',
+                        isExpanded ? 'rounded-b-none bg-muted/60' : 'hover:bg-muted'
+                      )}
                       onClick={() => {
-                        if (isExpanded) { setExpandedRepo(null) } else { setExpandedRepo(r.id); setBranchInput(r.default_branch || 'main') }
+                        if (isExpanded) { setExpandedRepo(null) }
+                        else { setExpandedRepo(r.id); setBranchInput(r.default_branch || 'main') }
                       }}
                     >
-                      <div className="file-icon">{r.source === 'gitlab' ? <GitLabIcon size={16} /> : <GitHubIcon size={16} />}</div>
-                      <div className="file-info">
-                        <div className="file-name">{r.full_name}</div>
-                        {r.description && <div className="file-meta">{r.description}</div>}
+                      <span className="text-muted-foreground shrink-0">
+                        {r.source === 'gitlab' ? <GitLabIcon size={15} /> : <GitHubIcon size={15} />}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{r.full_name}</p>
+                        {r.description && <p className="text-xs text-muted-foreground truncate">{r.description}</p>}
                       </div>
-                      <div style={{ display: 'flex', gap: '0.375rem', flexShrink: 0, alignItems: 'center' }}>
-                        {r.private && <span style={{ fontSize: '0.6875rem', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem', color: 'var(--muted)' }}>private</span>}
-                        <span style={{ fontSize: '0.6875rem', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 4, padding: '0.1rem 0.4rem', color: 'var(--accent)' }}>@{r.account}</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 500 }}>{isExpanded ? '▲' : 'Select →'}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {r.private && <Badge variant="secondary" className="text-[10px]">private</Badge>}
+                        <span className="text-[11px] bg-sky-400/10 border border-sky-400/20 text-sky-400 rounded px-1.5 py-0.5">@{r.account}</span>
+                        <span className="text-xs text-sky-400 font-medium">{isExpanded ? '▲' : 'Select →'}</span>
                       </div>
                     </div>
                     {isExpanded && (
-                      <div style={{ padding: '0.75rem 1rem', background: 'var(--surface2)', borderTop: '1px solid var(--border)', borderRadius: '0 0 8px 8px', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                          <label style={{ fontSize: '0.8125rem', color: 'var(--muted)', flexShrink: 0, minWidth: 60 }}>Branch:</label>
-                          <input
+                      <div className="px-4 py-3 bg-muted/40 border-t border-border rounded-b-lg space-y-2.5">
+                        <div className="flex items-center gap-3">
+                          <label className="text-xs text-muted-foreground w-16 shrink-0">Branch:</label>
+                          <Input
                             value={branchInput}
                             onChange={e => setBranchInput(e.target.value)}
                             onClick={e => e.stopPropagation()}
                             onKeyDown={e => { if (e.key === 'Enter') handleGenerate(r, branchInput, selectedTemplateId) }}
-                            style={{ flex: 1, fontSize: '0.8125rem', padding: '0.35rem 0.6rem' }}
+                            className="flex-1 h-7 text-xs"
                             autoFocus
                           />
                         </div>
                         {templates.length > 0 && (
-                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                            <label style={{ fontSize: '0.8125rem', color: 'var(--muted)', flexShrink: 0, minWidth: 60 }}>Template:</label>
+                          <div className="flex items-center gap-3">
+                            <label className="text-xs text-muted-foreground w-16 shrink-0">Template:</label>
                             <select
                               value={selectedTemplateId}
                               onChange={e => setSelectedTemplateId(e.target.value)}
                               onClick={e => e.stopPropagation()}
-                              style={{ flex: 1, fontSize: '0.8125rem', padding: '0.35rem 0.6rem' }}
+                              className={cn(selectClass, 'flex-1')}
                             >
                               <option value="">Default (5 pages)</option>
                               {templates.map(t => <option key={t.id} value={t.id}>{t.name} ({t.pages?.length || 0} pages)</option>)}
                             </select>
                           </div>
                         )}
-                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                          <button
-                            className="btn-primary"
-                            style={{ fontSize: '0.8125rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            className="flex items-center gap-1.5"
                             onClick={e => { e.stopPropagation(); handleGenerate(r, branchInput, selectedTemplateId) }}
                           >
                             <IconSparkle size={12} /> Generate
-                          </button>
+                          </Button>
                         </div>
                       </div>
                     )}
@@ -749,111 +747,112 @@ export default function WikiPage({ onToast }) {
               })}
             </div>
           </div>
-        </div>
+        </Card>
       </div>
     )
   }
 
-  // ── Wiki list (home) ────────────────────────────────────────────────────────
+  // ── Wiki list (home) ───────────────────────────────────────────────────────
   return (
-    <div style={{ maxWidth: 720 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+    <div className="max-w-2xl">
+      <div className="flex items-start justify-between mb-5 gap-4">
         <div>
-          <h2 style={{ fontSize: '1.0625rem', marginBottom: '0.25rem' }}>Your Wikis</h2>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--muted)' }}>Auto-generated documentation from your GitHub and GitLab repositories</p>
+          <h2 className="font-semibold text-base mb-1">Your Wikis</h2>
+          <p className="text-sm text-muted-foreground">Auto-generated documentation from your GitHub and GitLab repositories</p>
         </div>
-        <button
-          className="btn-primary"
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}
+        <Button
+          className="flex items-center gap-1.5 shrink-0"
           onClick={() => { setRepoSearch(''); setView('new') }}
         >
-          <IconSparkle size={14} /> New wiki
-        </button>
+          <IconSparkle size={13} /> New wiki
+        </Button>
       </div>
 
       {!wikisLoaded ? (
-        <div className="loading-overlay"><span className="spinner" /></div>
+        <div className="flex items-center justify-center h-32">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-primary" />
+        </div>
       ) : wikis.length === 0 ? (
-        <div className="card">
-          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem', padding: '3rem 1.5rem', textAlign: 'center' }}>
-            <div style={{ width: 56, height: 56, background: 'rgba(99,102,241,0.1)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Card>
+          <CardContent className="flex flex-col items-center gap-5 py-12 text-center">
+            <div className="h-14 w-14 rounded-full bg-sky-400/10 flex items-center justify-center text-sky-400">
               <IconBook size={24} />
             </div>
             <div>
-              <div style={{ fontWeight: 600, fontSize: '1rem', marginBottom: '0.5rem' }}>No wikis yet</div>
-              <p style={{ color: 'var(--muted)', fontSize: '0.875rem', maxWidth: 360 }}>
+              <p className="font-semibold text-base mb-2">No wikis yet</p>
+              <p className="text-sm text-muted-foreground max-w-sm">
                 Select a GitHub repository and let the AI automatically analyze its codebase and generate structured documentation.
               </p>
             </div>
-            <button
-              className="btn-primary"
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-              onClick={() => { setRepoSearch(''); setView('new') }}
-            >
-              <IconSparkle size={14} /> Generate your first wiki
-            </button>
-          </div>
-        </div>
+            <Button className="flex items-center gap-1.5" onClick={() => { setRepoSearch(''); setView('new') }}>
+              <IconSparkle size={13} /> Generate your first wiki
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+        <div className="flex flex-col gap-2.5">
           {wikis.map(wiki => (
             <div
               key={wiki.repo_slug}
-              className="card"
-              style={{ cursor: 'pointer', transition: 'border-color 0.12s' }}
+              className="rounded-xl border border-border bg-card cursor-pointer hover:border-sky-400/40 transition-colors"
               onClick={() => handleOpenWiki(wiki)}
-              onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
-              onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', padding: '1rem 1.25rem' }}>
-                <div style={{ width: 40, height: 40, background: 'rgba(99,102,241,0.1)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: 'var(--accent)' }}>
+              <div className="flex items-center gap-3.5 px-5 py-4">
+                <div className="h-10 w-10 rounded-lg bg-sky-400/10 flex items-center justify-center shrink-0 text-sky-400">
                   <IconBook size={18} />
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.9375rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <GitHubIcon size={13} />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{wiki.repo}</span>
-                    <span style={{ fontSize: '0.6875rem', color: 'var(--muted)', fontWeight: 400, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem' }}>{wiki.branch}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                    {wiki.source === 'gitlab' ? <GitLabIcon size={12} /> : <GitHubIcon size={12} />}
+                    <span className="font-semibold text-sm truncate">{wiki.repo}</span>
+                    <Badge variant="secondary" className="text-[10px]">{wiki.branch}</Badge>
                   </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
                     <span>{wiki.pages?.length || 0} pages</span>
                     <span>·</span>
                     <span>{new Date(wiki.generated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                     {wiki.stack?.length > 0 && (
-                      <div style={{ display: 'flex', gap: '0.25rem' }}>
-                        {wiki.stack.map(s => <span key={s} style={{ color: 'var(--accent)', fontSize: '0.6875rem', background: 'rgba(99,102,241,0.08)', borderRadius: 4, padding: '0.1rem 0.35rem', border: '1px solid rgba(99,102,241,0.15)' }}>{s}</span>)}
+                      <div className="flex gap-1">
+                        {wiki.stack.map(s => (
+                          <span key={s} className="text-sky-400 bg-sky-400/8 border border-sky-400/15 rounded px-1.5 py-0.5 text-[10px]">{s}</span>
+                        ))}
                       </div>
                     )}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: '0.375rem', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-                  <button
-                    className="btn-icon"
-                    title="Delete"
-                    onClick={() => setConfirmDelete(wiki)}
-                  >
-                    <IconTrash size={14} />
-                  </button>
-                </div>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                  title="Delete"
+                  onClick={e => { e.stopPropagation(); setConfirmDelete(wiki) }}
+                >
+                  <IconTrash size={14} />
+                </Button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {confirmDelete && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <div className="modal-icon"><IconTrash size={20} /></div>
-            <h3>Delete wiki?</h3>
-            <p>This will permanently delete the wiki for <strong>{confirmDelete.repo}</strong>.</p>
-            <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => setConfirmDelete(null)}>Cancel</button>
-              <button className="btn-danger" onClick={() => handleDeleteWiki(confirmDelete)}>Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Delete confirm */}
+      <Dialog open={!!confirmDelete} onOpenChange={open => !open && setConfirmDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span className="text-destructive"><IconTrash size={16} /></span>
+              Delete wiki?
+            </DialogTitle>
+            <DialogDescription>
+              This will permanently delete the wiki for <strong>{confirmDelete?.repo}</strong>.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => confirmDelete && handleDeleteWiki(confirmDelete)}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

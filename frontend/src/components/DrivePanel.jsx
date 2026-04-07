@@ -4,6 +4,13 @@ import {
   driveDisconnect, listDriveFiles, uploadDriveFile, deleteDriveFile,
   startDriveAuth,
 } from '../api'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 
 function formatBytes(b) {
   if (!b) return '—'
@@ -15,24 +22,17 @@ function formatDate(d) {
   return new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-// ── Setup helpers ─────────────────────────────────────────────────────────────
 function StepNum({ n }) {
   return (
-    <span style={{
-      flexShrink: 0, width: 24, height: 24, borderRadius: '50%',
-      background: 'var(--accent)', color: 'white',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: '0.75rem', fontWeight: 700, marginTop: 1,
-    }}>{n}</span>
+    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-400 text-xs font-bold text-white mt-0.5">
+      {n}
+    </span>
   )
 }
 
 function Chip({ children }) {
   return (
-    <code style={{
-      background: 'var(--surface2)', border: '1px solid var(--border)',
-      borderRadius: 5, padding: '0.15em 0.45em', fontSize: '0.8125rem',
-    }}>{children}</code>
+    <code className="rounded bg-muted px-1.5 py-0.5 text-xs border border-border font-mono">{children}</code>
   )
 }
 
@@ -46,14 +46,14 @@ function CopyBtn({ text }) {
     })
   }
   return (
-    <button onClick={copy} style={{
-      position: 'absolute', top: 6, right: 6,
-      background: 'var(--surface)', border: '1px solid var(--border)',
-      borderRadius: 5, fontSize: '0.7rem', padding: '0.2rem 0.5rem',
-      color: copied ? 'var(--success)' : 'var(--muted)', cursor: 'pointer',
-    }}>
+    <Button
+      variant="outline"
+      size="xs"
+      onClick={copy}
+      className={cn('absolute top-2 right-2', copied && 'text-green-500')}
+    >
       {copied ? 'Copied!' : 'Copy'}
-    </button>
+    </Button>
   )
 }
 
@@ -76,55 +76,57 @@ function FolderPicker({ onPick, onClose }) {
     : []
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-    }}>
-      <div style={{
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 12, width: 420, maxHeight: '70vh',
-        display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem 1.25rem', borderBottom: '1px solid var(--border)' }}>
-          <h2 style={{ fontSize: '0.9375rem' }}>Select Drive Folder</h2>
-          <button onClick={onClose} className="btn-icon" style={{ opacity: 1 }}>✕</button>
-        </div>
-        <div style={{ padding: '0.75rem 1.25rem' }}>
-          <input
-            style={{ width: '100%' }}
+    <Dialog open onOpenChange={open => !open && onClose()}>
+      <DialogContent className="max-w-md p-0 overflow-hidden">
+        <DialogHeader className="px-5 py-4 border-b">
+          <DialogTitle>Select Drive Folder</DialogTitle>
+        </DialogHeader>
+        <div className="px-5 py-3 border-b">
+          <Input
             placeholder="Search folders…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             autoFocus
           />
         </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 1.25rem 1rem' }}>
-          {loading && <div className="loading-overlay" style={{ minHeight: 120 }}><span className="spinner" /></div>}
-          {error && <p style={{ color: 'var(--danger)', fontSize: '0.875rem' }}>{error}</p>}
+        <div className="max-h-80 overflow-y-auto px-3 py-2">
+          {loading && (
+            <div className="flex items-center justify-center py-8">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-border border-t-primary" />
+            </div>
+          )}
+          {error && <p className="text-sm text-destructive px-2 py-3">{error}</p>}
           {!loading && filtered.length === 0 && (
-            <p style={{ color: 'var(--muted)', fontSize: '0.875rem', textAlign: 'center', padding: '1.5rem 0' }}>No folders found</p>
+            <p className="text-sm text-muted-foreground text-center py-6">No folders found</p>
           )}
           {filtered.map(f => (
-            <div
+            <button
               key={f.id}
               onClick={() => onPick(f)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.625rem',
-                padding: '0.625rem 0.5rem', borderRadius: 6, cursor: 'pointer',
-                fontSize: '0.875rem', transition: 'background 0.1s',
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              className="flex items-center gap-2.5 w-full rounded-lg px-3 py-2.5 text-sm hover:bg-muted transition-colors text-left"
             >
-              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" strokeWidth="2">
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" className="text-sky-400 shrink-0">
                 <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
               </svg>
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
-            </div>
+              <span className="flex-1 truncate">{f.name}</span>
+            </button>
           ))}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DriveIcon({ size = 20, className }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 87.3 78" className={className}>
+      <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
+      <path d="M43.65 25L29.9 1.2C28.55 2 27.4 3.1 26.6 4.5L1.2 48.5C.4 49.9 0 51.45 0 53h27.45z" fill="#00ac47"/>
+      <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.85l5.55 10.25z" fill="#ea4335"/>
+      <path d="M43.65 25L57.4 1.2C56.05.4 54.5 0 52.95 0H34.35c-1.55 0-3.1.45-4.45 1.2z" fill="#00832d"/>
+      <path d="M59.85 53H27.45L13.7 76.8c1.35.8 2.9 1.2 4.45 1.2h50c1.55 0 3.1-.4 4.45-1.2z" fill="#2684fc"/>
+      <path d="M73.4 26.5l-12.65-21.8C59.95 3.1 58.8 2 57.4 1.2L43.65 25 59.85 53h27.4c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
+    </svg>
   )
 }
 
@@ -139,7 +141,6 @@ export default function DrivePanel({ selectedFile, onSelect, onToast }) {
   const [progress, setProgress]     = useState(0)
   const inputRef = useRef()
 
-  // Check if just returned from OAuth
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     if (params.get('drive') === 'connected') {
@@ -151,8 +152,7 @@ export default function DrivePanel({ selectedFile, onSelect, onToast }) {
     }
   }, [])
 
-  const loadStatus = () =>
-    getDriveStatus().then(setStatus).catch(() => {})
+  const loadStatus = () => getDriveStatus().then(setStatus).catch(() => {})
 
   useEffect(() => { loadStatus() }, [])
 
@@ -226,38 +226,35 @@ export default function DrivePanel({ selectedFile, onSelect, onToast }) {
   }
 
   if (!status) return (
-    <div className="loading-overlay" style={{ minHeight: 200 }}><span className="spinner" /></div>
+    <div className="flex items-center justify-center min-h-[200px]">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-primary" />
+    </div>
   )
 
-  // ── Not configured ────────────────────────────────────────────────────────
+  // ── Not configured ─────────────────────────────────────────────────────────
   if (!status.configured) return (
-    <div className="card" style={{ maxWidth: 640 }}>
-      <div className="card-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+    <Card className="max-w-2xl">
+      <CardHeader className="border-b">
+        <div className="flex items-center gap-2">
           <DriveIcon size={16} />
-          <h2>Setup required</h2>
+          <CardTitle>Setup required</CardTitle>
         </div>
-      </div>
-      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-
-        {/* Step 1 */}
-        <div style={{ display: 'flex', gap: '0.875rem' }}>
+      </CardHeader>
+      <CardContent className="pt-5 space-y-5">
+        <div className="flex gap-3">
           <StepNum n={1} />
-          <div>
-            <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.35rem' }}>
-              Add env vars to your Railway service
-            </div>
-            <p style={{ fontSize: '0.8125rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
+          <div className="space-y-2">
+            <p className="text-sm font-semibold">Add env vars to your Railway service</p>
+            <p className="text-xs text-muted-foreground">
               In Railway → your service → <strong>Variables</strong>, add:
             </p>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <div className="flex gap-2 flex-wrap">
               <Chip>GOOGLE_CLIENT_ID</Chip>
               <Chip>GOOGLE_CLIENT_SECRET</Chip>
             </div>
-            <p style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.5rem' }}>
+            <p className="text-xs text-muted-foreground">
               Get these from{' '}
-              <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer"
-                style={{ color: 'var(--accent)' }}>
+              <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline underline-offset-3">
                 Google Cloud Console → APIs &amp; Services → Credentials
               </a>
               {' '}→ OAuth 2.0 Client ID (Web application).
@@ -265,213 +262,207 @@ export default function DrivePanel({ selectedFile, onSelect, onToast }) {
           </div>
         </div>
 
-        {/* Step 2 */}
-        <div style={{ display: 'flex', gap: '0.875rem' }}>
+        <div className="flex gap-3">
           <StepNum n={2} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.35rem' }}>
-              Add the redirect URI to your Google OAuth client
-            </div>
-            <p style={{ fontSize: '0.8125rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
+          <div className="flex-1 min-w-0 space-y-2">
+            <p className="text-sm font-semibold">Add the redirect URI to your Google OAuth client</p>
+            <p className="text-xs text-muted-foreground">
               In your OAuth client's <strong>Authorized redirect URIs</strong>, add exactly:
             </p>
-            <div style={{ position: 'relative' }}>
-              <pre style={{
-                background: 'var(--surface2)', border: '1px solid var(--border)',
-                borderRadius: 8, padding: '0.625rem 3rem 0.625rem 0.875rem',
-                fontSize: '0.8125rem', overflowX: 'auto', whiteSpace: 'pre',
-                color: 'var(--text)', margin: 0,
-              }}>
+            <div className="relative">
+              <pre className="rounded-lg bg-muted border border-border px-3 py-2.5 pr-20 text-xs overflow-x-auto">
                 {status.redirect_uri || 'https://<your-app>.railway.app/api/drive/callback'}
               </pre>
               <CopyBtn text={status.redirect_uri} />
             </div>
-            <p style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '0.4rem' }}>
-              This URL is auto-derived from your Railway domain — no manual configuration needed.
-            </p>
           </div>
         </div>
 
-        {/* Step 3 */}
-        <div style={{ display: 'flex', gap: '0.875rem' }}>
+        <div className="flex gap-3">
           <StepNum n={3} />
-          <div>
-            <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.35rem' }}>
-              Redeploy
-            </div>
-            <p style={{ fontSize: '0.8125rem', color: 'var(--muted)' }}>
+          <div className="space-y-1">
+            <p className="text-sm font-semibold">Redeploy</p>
+            <p className="text-xs text-muted-foreground">
               After setting the env vars, trigger a redeploy. The Drive tab will update automatically.
             </p>
           </div>
         </div>
-
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 
-  // ── Not connected ─────────────────────────────────────────────────────────
+  // ── Not connected ──────────────────────────────────────────────────────────
   if (!status.connected) return (
-    <div className="card">
-      <div className="card-body" style={{ textAlign: 'center', padding: '2.5rem 1.5rem' }}>
-        <DriveIcon size={40} style={{ margin: '0 auto 1rem' }} />
-        <h3 style={{ marginBottom: '0.5rem' }}>Connect Google Drive</h3>
-        <p style={{ color: 'var(--muted)', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
-          Authorise access to pick a folder as your files source.
-        </p>
-        <button className="btn-primary" style={{ padding: '0.6rem 1.5rem' }} onClick={startDriveAuth}>
-          Sign in with Google
-        </button>
-      </div>
-    </div>
+    <Card className="max-w-sm">
+      <CardContent className="flex flex-col items-center gap-4 py-10 text-center">
+        <DriveIcon size={40} />
+        <div>
+          <h3 className="font-semibold text-base mb-1">Connect Google Drive</h3>
+          <p className="text-sm text-muted-foreground">Authorise access to pick a folder as your files source.</p>
+        </div>
+        <Button onClick={startDriveAuth}>Sign in with Google</Button>
+      </CardContent>
+    </Card>
   )
 
-  // ── Connected ─────────────────────────────────────────────────────────────
+  // ── Connected ──────────────────────────────────────────────────────────────
   return (
     <>
       {showPicker && <FolderPicker onPick={handlePickFolder} onClose={() => setShowPicker(false)} />}
 
-      <div className="files-layout">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-
+      <div className="grid md:grid-cols-[280px_1fr] gap-4 items-start">
+        <div className="flex flex-col gap-4">
           {/* Connection card */}
-          <div className="card">
-            <div className="card-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <DriveIcon size={16} />
-                <h2>Google Drive</h2>
-              </div>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.75rem', color: 'var(--success)' }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)', display: 'inline-block' }} />
-                Connected
-              </span>
-            </div>
-            <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.2rem' }}>Active folder</div>
-                  {status.folder
-                    ? <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>📁 {status.folder.name}</span>
-                    : <span style={{ color: 'var(--muted)', fontSize: '0.875rem' }}>No folder selected</span>}
+          <Card>
+            <CardHeader className="border-b">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <DriveIcon size={16} />
+                  <CardTitle>Google Drive</CardTitle>
                 </div>
-                <button className="btn-add" onClick={() => setShowPicker(true)}>
-                  {status.folder ? 'Change' : 'Pick folder'}
-                </button>
+                <span className="flex items-center gap-1.5 text-xs text-green-500 font-medium">
+                  <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                  Connected
+                </span>
               </div>
-              <button
+            </CardHeader>
+            <CardContent className="pt-4 space-y-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex-1">
+                  <p className="text-xs text-muted-foreground mb-0.5">Active folder</p>
+                  {status.folder
+                    ? <span className="text-sm font-semibold">📁 {status.folder.name}</span>
+                    : <span className="text-sm text-muted-foreground">No folder selected</span>}
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setShowPicker(true)}>
+                  {status.folder ? 'Change' : 'Pick folder'}
+                </Button>
+              </div>
+              <Button
+                variant="destructive"
+                size="sm"
                 onClick={handleDisconnect}
-                style={{ background: 'transparent', color: 'var(--danger)', border: '1px solid var(--danger)', fontSize: '0.75rem', padding: '0.3rem 0.75rem', alignSelf: 'flex-start' }}
               >
                 Disconnect
-              </button>
-            </div>
-          </div>
+              </Button>
+            </CardContent>
+          </Card>
 
           {/* Upload */}
           {status.folder && (
-            <div className="card">
-              <div className="card-header"><h2>Upload to Drive</h2></div>
-              <div className="card-body">
+            <Card>
+              <CardHeader className="border-b"><CardTitle>Upload to Drive</CardTitle></CardHeader>
+              <CardContent className="pt-4 space-y-3">
                 <div
-                  className={`upload-zone${dragOver ? ' drag-over' : ''}`}
+                  className={cn(
+                    'flex flex-col items-center gap-2 rounded-xl border-2 border-dashed p-6 cursor-pointer transition-colors text-sm',
+                    dragOver ? 'border-sky-400 bg-sky-400/5' : 'border-border hover:border-muted-foreground/40 hover:bg-muted/40'
+                  )}
                   onClick={() => !uploading && inputRef.current.click()}
                   onDragOver={e => { e.preventDefault(); setDragOver(true) }}
                   onDragLeave={() => setDragOver(false)}
                   onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files) }}
                 >
-                  <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" strokeWidth="1.5">
+                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24" className="text-sky-400" stroke="currentColor" strokeWidth="1.5">
                     <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1"/>
                     <polyline points="16 6 12 2 8 6"/>
                     <line x1="12" y1="2" x2="12" y2="15"/>
                   </svg>
-                  <p>Drop or click to upload</p>
-                  <p style={{ marginTop: '0.2rem' }}>
-                    <span className="ext-badge">.mf4</span>
-                    <span className="ext-badge">.mdf</span>
-                    <span className="ext-badge">.md</span>
-                  </p>
-                </div>
-                {uploading && (
-                  <div className="progress-bar" style={{ marginTop: '0.75rem' }}>
-                    <div className="progress-fill" style={{ width: `${progress}%` }} />
+                  <p className="text-muted-foreground text-xs">Drop or click to upload</p>
+                  <div className="flex gap-1.5">
+                    {['.mf4', '.mdf', '.md'].map(ext => (
+                      <span key={ext} className="text-xs bg-secondary text-secondary-foreground rounded px-1.5 py-0.5">{ext}</span>
+                    ))}
                   </div>
-                )}
-                <input ref={inputRef} type="file" accept=".mf4,.mdf,.md,.MF4,.MDF,.MD"
-                  style={{ display: 'none' }} onChange={e => handleFiles(e.target.files)} />
-              </div>
-            </div>
+                </div>
+                {uploading && <Progress value={progress} />}
+                <input
+                  ref={inputRef}
+                  type="file"
+                  accept=".mf4,.mdf,.md,.MF4,.MDF,.MD"
+                  className="hidden"
+                  onChange={e => handleFiles(e.target.files)}
+                />
+              </CardContent>
+            </Card>
           )}
         </div>
 
-        {/* File list / detail */}
-        <div className="card">
+        {/* File list */}
+        <Card>
           {!status.folder ? (
-            <div className="viewer-placeholder" style={{ minHeight: 220 }}>
-              <svg width="36" height="36" fill="none" viewBox="0 0 24 24" stroke="var(--border)" strokeWidth="1.5">
+            <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
+              <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
                 <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
               </svg>
-              <span>Pick a Drive folder to see files</span>
-            </div>
+              <p className="text-sm">Pick a Drive folder to see files</p>
+            </CardContent>
           ) : (
             <>
-              <div className="card-header">
-                <h2>Files in "{status.folder.name}"</h2>
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  {files.length > 0 && <span className="badge">{files.length}</span>}
-                  <button className="btn-add" onClick={loadFiles} disabled={loadingFiles} style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}>
+              <CardHeader className="border-b">
+                <div className="flex items-center gap-2">
+                  <CardTitle className="truncate">Files in "{status.folder.name}"</CardTitle>
+                  {files.length > 0 && <Badge variant="secondary">{files.length}</Badge>}
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    className="ml-auto shrink-0"
+                    onClick={loadFiles}
+                    disabled={loadingFiles}
+                  >
                     ↺ Refresh
-                  </button>
+                  </Button>
                 </div>
-              </div>
-              <div className="card-body">
+              </CardHeader>
+              <CardContent className="pt-3">
                 {loadingFiles ? (
-                  <div className="loading-overlay" style={{ minHeight: 120 }}><span className="spinner" /> Loading…</div>
+                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-primary" />
+                    Loading…
+                  </div>
                 ) : files.length === 0 ? (
-                  <div className="empty-state">No supported files in this folder.</div>
+                  <p className="py-8 text-center text-sm text-muted-foreground">No supported files in this folder.</p>
                 ) : (
-                  <div className="file-list">
+                  <div className="flex flex-col gap-0.5">
                     {files.map(f => (
                       <div
                         key={f.id}
-                        className={`file-item${selectedFile?.id === f.id ? ' active' : ''}`}
+                        className={cn(
+                          'flex items-center gap-2.5 rounded-lg px-3 py-2.5 cursor-pointer transition-colors group',
+                          selectedFile?.id === f.id
+                            ? 'bg-sky-400/10 border border-sky-400/20'
+                            : 'hover:bg-muted border border-transparent'
+                        )}
                         onClick={() => onSelect(f)}
                       >
-                        <div className="file-icon"><DriveIcon size={18} /></div>
-                        <div className="file-info">
-                          <div className="file-name" title={f.name}>{f.name}</div>
-                          <div className="file-meta">{formatBytes(f.size)} · {formatDate(f.uploaded_at)}</div>
+                        <DriveIcon size={16} />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate" title={f.name}>{f.name}</div>
+                          <div className="text-xs text-muted-foreground">{formatBytes(f.size)} · {formatDate(f.uploaded_at)}</div>
                         </div>
-                        <div className="file-actions">
-                          <button className="btn-icon" title="Delete" onClick={e => handleDelete(e, f.id)}>
-                            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                              <polyline points="3 6 5 6 21 6"/>
-                              <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
-                              <path d="M10 11v6M14 11v6"/>
-                              <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
-                            </svg>
-                          </button>
-                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          className="opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          title="Delete"
+                          onClick={e => handleDelete(e, f.id)}
+                        >
+                          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                            <polyline points="3 6 5 6 21 6"/>
+                            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+                            <path d="M10 11v6M14 11v6"/>
+                            <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+                          </svg>
+                        </Button>
                       </div>
                     ))}
                   </div>
                 )}
-              </div>
+              </CardContent>
             </>
           )}
-        </div>
+        </Card>
       </div>
     </>
-  )
-}
-
-function DriveIcon({ size = 20, style }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 87.3 78" style={style}>
-      <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
-      <path d="M43.65 25L29.9 1.2C28.55 2 27.4 3.1 26.6 4.5L1.2 48.5C.4 49.9 0 51.45 0 53h27.45z" fill="#00ac47"/>
-      <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.85l5.55 10.25z" fill="#ea4335"/>
-      <path d="M43.65 25L57.4 1.2C56.05.4 54.5 0 52.95 0H34.35c-1.55 0-3.1.45-4.45 1.2z" fill="#00832d"/>
-      <path d="M59.85 53H27.45L13.7 76.8c1.35.8 2.9 1.2 4.45 1.2h50c1.55 0 3.1-.4 4.45-1.2z" fill="#2684fc"/>
-      <path d="M73.4 26.5l-12.65-21.8C59.95 3.1 58.8 2 57.4 1.2L43.65 25 59.85 53h27.4c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
-    </svg>
   )
 }

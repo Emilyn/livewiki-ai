@@ -2,7 +2,10 @@ import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import mermaid from 'mermaid'
+import DOMPurify from 'dompurify'
 import { getWikiShare, getWikiSharePage } from '../api'
+import { Input } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 
 mermaid.initialize({ startOnLoad: false, theme: 'dark', darkMode: true })
 
@@ -12,7 +15,7 @@ function MermaidBlock({ code }) {
   useEffect(() => {
     const id = 'mermaid-' + Math.random().toString(36).slice(2)
     mermaid.render(id, code)
-      .then(({ svg }) => setSvg(svg))
+      .then(({ svg }) => setSvg(DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, ADD_TAGS: ['style', 'foreignObject', 'div', 'span'], ADD_ATTR: ['xmlns', 'dominant-baseline', 'requiredFeatures'] })))
       .catch(() => setError('Invalid diagram syntax'))
       .finally(() => {
         document.getElementById(`d${id}`)?.remove()
@@ -20,12 +23,12 @@ function MermaidBlock({ code }) {
       })
   }, [code])
   if (error) return (
-    <div style={{ padding: '0.625rem 0.875rem', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.8125rem', color: 'var(--muted)', fontStyle: 'italic' }}>
+    <div className="rounded-lg border border-border bg-muted px-3 py-2 text-xs text-muted-foreground italic">
       ⚠ Mermaid diagram could not be rendered
     </div>
   )
   if (!svg) return null
-  return <div style={{ overflowX: 'auto', margin: '1rem 0', textAlign: 'center' }} dangerouslySetInnerHTML={{ __html: svg }} />
+  return <div className="overflow-x-auto my-4 text-center" dangerouslySetInnerHTML={{ __html: svg }} />
 }
 
 function CodeBlock({ className, children }) {
@@ -77,75 +80,75 @@ export default function SharedWikiPage({ token }) {
   ) ?? []
 
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-      <span className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} />
+    <div className="flex h-screen items-center justify-center bg-background">
+      <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-border border-t-primary" />
     </div>
   )
 
   if (error) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: '1rem', color: 'var(--muted)', textAlign: 'center', padding: '2rem' }}>
-      <IconBook size={40} />
-      <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text)' }}>Wiki not found</div>
-      <div style={{ fontSize: '0.875rem' }}>{error}</div>
+    <div className="flex h-screen flex-col items-center justify-center gap-4 text-muted-foreground text-center p-8 bg-background">
+      <span className="opacity-50"><IconBook size={40} /></span>
+      <div className="font-semibold text-base text-foreground">Wiki not found</div>
+      <p className="text-sm">{error}</p>
     </div>
   )
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--bg)', color: 'var(--text)' }}>
+    <div className="flex flex-col min-h-screen bg-background">
       {/* Header */}
-      <header style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0.875rem 1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0 }}>
-          <GitHubIcon size={16} />
-          <span style={{ fontWeight: 700, fontSize: '1rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{wiki.repo}</span>
-          <span style={{ fontSize: '0.6875rem', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '0.1rem 0.4rem', color: 'var(--muted)', flexShrink: 0 }}>{wiki.branch}</span>
+      <header className="border-b border-border bg-card px-6 py-3.5 flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <GitHubIcon size={15} />
+          <span className="font-bold text-base truncate">{wiki.repo}</span>
+          <span className="text-[11px] bg-muted border border-border rounded px-1.5 py-0.5 text-muted-foreground shrink-0">
+            {wiki.branch}
+          </span>
           {wiki.stack?.map(s => (
-            <span key={s} style={{ fontSize: '0.6875rem', background: 'rgba(99,102,241,0.1)', color: 'var(--accent)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 4, padding: '0.1rem 0.4rem', flexShrink: 0 }}>{s}</span>
+            <span key={s} className="text-[11px] bg-sky-400/10 text-sky-400 border border-sky-400/20 rounded px-1.5 py-0.5 shrink-0">{s}</span>
           ))}
           {wiki.has_custom_config && (
-            <span style={{ fontSize: '0.6875rem', background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 4, padding: '0.1rem 0.4rem', flexShrink: 0 }}>wiki.json</span>
+            <span className="text-[11px] bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 rounded px-1.5 py-0.5 shrink-0">wiki.json</span>
           )}
         </div>
-        <div style={{ fontSize: '0.75rem', color: 'var(--muted)', flexShrink: 0 }}>
+        <span className="text-xs text-muted-foreground shrink-0">
           Generated {new Date(wiki.generated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-        </div>
+        </span>
       </header>
 
       {/* Body */}
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+      <div className="flex flex-1 min-h-0">
         {/* Page sidebar */}
-        <aside style={{ width: 220, flexShrink: 0, background: 'var(--surface)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', padding: '0.75rem 0.5rem', gap: '0.25rem', overflowY: 'auto' }}>
-          <input
-            placeholder="Search pages…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{ fontSize: '0.8125rem', padding: '0.35rem 0.6rem', marginBottom: '0.375rem' }}
-          />
+        <aside className="w-52 shrink-0 border-r border-border bg-card flex flex-col p-2 gap-0.5 overflow-y-auto">
+          <div className="px-1 pb-2">
+            <Input
+              placeholder="Search pages…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="h-7 text-xs"
+            />
+          </div>
           {filteredPages.map(page => (
             <button
               key={page.id}
               onClick={() => setActivePage(page)}
-              style={{
-                width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem',
-                padding: '0.5rem 0.625rem', borderRadius: 6, fontSize: '0.8125rem',
-                background: activePage?.id === page.id ? 'rgba(99,102,241,0.1)' : 'transparent',
-                color: activePage?.id === page.id ? 'var(--accent)' : 'var(--text)',
-                border: `1px solid ${activePage?.id === page.id ? 'rgba(99,102,241,0.25)' : 'transparent'}`,
-                cursor: 'pointer', textAlign: 'left',
-                fontWeight: activePage?.id === page.id ? 600 : 400,
-                transition: 'all 0.12s',
-              }}
+              className={cn(
+                'flex items-center gap-2 w-full rounded-lg px-2.5 py-2 text-sm transition-colors text-left',
+                activePage?.id === page.id
+                  ? 'bg-sky-400/10 text-sky-400 border border-sky-400/20 font-semibold'
+                  : 'text-foreground hover:bg-muted border border-transparent'
+              )}
             >
-              <IconBook size={13} />
+              <span className="shrink-0 text-muted-foreground"><IconBook size={12} /></span>
               {page.title}
             </button>
           ))}
         </aside>
 
         {/* Content */}
-        <main style={{ flex: 1, overflowY: 'auto', padding: '2rem 2.5rem' }}>
+        <main className="flex-1 overflow-y-auto px-8 py-8 max-w-4xl">
           {pageLoading ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted)' }}>
-              <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> Loading…
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-primary" /> Loading…
             </div>
           ) : (
             <div className="md-body">
@@ -158,8 +161,8 @@ export default function SharedWikiPage({ token }) {
       </div>
 
       {/* Footer */}
-      <footer style={{ background: 'var(--surface)', borderTop: '1px solid var(--border)', padding: '0.625rem 1.5rem', fontSize: '0.75rem', color: 'var(--muted)', textAlign: 'center' }}>
-        Generated by <strong style={{ color: 'var(--text)' }}>LiveWiki</strong>
+      <footer className="border-t border-border bg-card px-6 py-3 text-xs text-muted-foreground text-center">
+        Generated by <strong className="text-foreground">LiveWiki</strong>
       </footer>
     </div>
   )

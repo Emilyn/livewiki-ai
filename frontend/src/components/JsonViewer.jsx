@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getFileContent, saveFileContent, getDriveFileContent, saveDriveFileContent } from '../api'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 // ── Syntax-highlighted JSON renderer ─────────────────────────────────────────
 function highlight(json) {
@@ -13,20 +15,20 @@ function highlight(json) {
           return `<span style="color:#86efac">${match}</span>` // string value
         }
         if (/true|false/.test(match)) return `<span style="color:#fbbf24">${match}</span>`
-        if (/null/.test(match)) return `<span style="color:#f87171">${match}</span>`
+        if (/null/.test(match))       return `<span style="color:#f87171">${match}</span>`
         return `<span style="color:#c4b5fd">${match}</span>` // number
       }
     )
 }
 
 export default function JsonViewer({ file, onToast }) {
-  const [raw, setRaw]         = useState(null)
-  const [draft, setDraft]     = useState(null)
-  const [mode, setMode]       = useState('view') // 'view' | 'edit'
+  const [raw, setRaw]           = useState(null)
+  const [draft, setDraft]       = useState(null)
+  const [mode, setMode]         = useState('view') // 'view' | 'edit'
   const [parseErr, setParseErr] = useState('')
-  const [saving, setSaving]   = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [copied, setCopied]   = useState(false)
+  const [saving, setSaving]     = useState(false)
+  const [loading, setLoading]   = useState(false)
+  const [copied, setCopied]     = useState(false)
 
   useEffect(() => {
     if (!file) return
@@ -38,14 +40,12 @@ export default function JsonViewer({ file, onToast }) {
     const fetchContent = file.source === 'drive' ? getDriveFileContent : getFileContent
     fetchContent(file.id)
       .then(text => {
-        // axios may auto-parse JSON into an object; normalise to string first
         const str = typeof text === 'string' ? text : JSON.stringify(text, null, 2)
         try {
           const pretty = JSON.stringify(JSON.parse(str), null, 2)
           setRaw(pretty)
           setDraft(pretty)
         } catch {
-          // Not valid JSON — still load it for editing
           setRaw(str)
           setDraft(str)
           setParseErr('File contains invalid JSON')
@@ -58,8 +58,7 @@ export default function JsonViewer({ file, onToast }) {
   const isDirty = draft !== raw
 
   const handleSave = async () => {
-    // Validate before saving
-    try { JSON.parse(draft) } catch (e) {
+    try { JSON.parse(draft) } catch {
       onToast('Invalid JSON — fix errors before saving', 'error')
       return
     }
@@ -110,84 +109,68 @@ export default function JsonViewer({ file, onToast }) {
   }
 
   if (loading) return (
-    <div className="card">
-      <div className="loading-overlay"><span className="spinner" /> Loading...</div>
+    <div className="flex items-center justify-center p-12 rounded-xl border border-border bg-card">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-primary" />
     </div>
   )
 
   if (raw === null) return null
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+    <div className="flex flex-col rounded-xl border border-border bg-card overflow-hidden">
       {/* Header */}
-      <div className="card-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
-          <h2 style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</h2>
-          {isDirty && <span style={{ fontSize: '0.7rem', color: 'var(--muted)', flexShrink: 0 }}>● unsaved</span>}
+      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
+        <div className="flex items-center gap-2 min-w-0">
+          <h2 className="text-sm font-semibold truncate">{file.name}</h2>
+          {isDirty && <span className="text-[0.7rem] text-muted-foreground shrink-0">● unsaved</span>}
         </div>
-        <div style={{ display: 'flex', gap: '0.375rem', alignItems: 'center', flexShrink: 0 }}>
+        <div className="flex gap-1.5 items-center shrink-0">
           {['view', 'edit'].map(m => (
-            <button
+            <Button
               key={m}
+              size="xs"
+              variant={mode === m ? 'default' : 'outline'}
               onClick={() => setMode(m)}
-              style={{
-                padding: '0.3rem 0.65rem',
-                fontSize: '0.75rem',
-                background: mode === m ? 'var(--accent)' : 'var(--surface2)',
-                color: mode === m ? 'white' : 'var(--muted)',
-                border: '1px solid ' + (mode === m ? 'var(--accent)' : 'var(--border)'),
-              }}
+              className={mode === m ? 'bg-sky-400 hover:bg-sky-500 border-sky-400' : ''}
             >
               {m === 'view' ? 'View' : 'Edit'}
-            </button>
+            </Button>
           ))}
           {mode === 'edit' && (
-            <button
-              onClick={handleFormat}
-              style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem', background: 'var(--surface2)', color: 'var(--muted)', border: '1px solid var(--border)' }}
-            >
-              Format
-            </button>
+            <Button size="xs" variant="outline" onClick={handleFormat}>Format</Button>
           )}
-          <button
+          <Button
+            size="xs"
+            variant="outline"
             onClick={handleCopy}
-            style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem', background: 'var(--surface2)', color: copied ? 'var(--success)' : 'var(--muted)', border: '1px solid var(--border)' }}
+            className={cn(copied && 'text-green-500 border-green-500/30')}
           >
             {copied ? 'Copied!' : 'Copy'}
-          </button>
+          </Button>
           {isDirty && (
             <>
-              <button onClick={() => setDraft(raw)} style={{ background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', padding: '0.3rem 0.65rem', fontSize: '0.75rem' }}>
-                Discard
-              </button>
-              <button onClick={handleSave} disabled={saving} className="btn-primary" style={{ padding: '0.3rem 0.75rem', fontSize: '0.75rem' }}>
+              <Button size="xs" variant="ghost" onClick={() => setDraft(raw)}>Discard</Button>
+              <Button size="xs" onClick={handleSave} disabled={saving}
+                className="bg-sky-400 hover:bg-sky-500 text-white">
                 {saving ? 'Saving…' : 'Save'}
-              </button>
+              </Button>
             </>
           )}
         </div>
       </div>
 
       {parseErr && (
-        <div style={{ padding: '0.5rem 1rem', background: 'rgba(239,68,68,0.1)', borderBottom: '1px solid rgba(239,68,68,0.3)', color: 'var(--danger)', fontSize: '0.8125rem' }}>
+        <div className="px-4 py-2 bg-destructive/10 border-b border-destructive/30 text-destructive text-[0.8125rem]">
           {parseErr}
         </div>
       )}
 
       {/* Body */}
       {mode === 'view' ? (
-        <div style={{ overflowY: 'auto', overflowX: 'auto' }}>
+        <div className="overflow-auto">
           <pre
-            style={{
-              margin: 0,
-              padding: '1.25rem',
-              fontFamily: "'Fira Code', 'Cascadia Code', monospace",
-              fontSize: '0.8125rem',
-              lineHeight: 1.7,
-              color: 'var(--text)',
-              background: 'transparent',
-              whiteSpace: 'pre',
-            }}
+            className="m-0 p-5 text-[0.8125rem] leading-relaxed text-foreground bg-transparent whitespace-pre"
+            style={{ fontFamily: "'Fira Code', 'Cascadia Code', monospace" }}
             dangerouslySetInnerHTML={{ __html: highlight(raw) }}
           />
         </div>
@@ -197,20 +180,8 @@ export default function JsonViewer({ file, onToast }) {
           onChange={e => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
           spellCheck={false}
-          style={{
-            flex: 1,
-            resize: 'none',
-            background: 'var(--bg)',
-            color: 'var(--text)',
-            border: 'none',
-            outline: 'none',
-            padding: '1.25rem',
-            fontFamily: "'Fira Code', 'Cascadia Code', monospace",
-            fontSize: '0.875rem',
-            lineHeight: 1.7,
-            minHeight: 500,
-            tabSize: 2,
-          }}
+          className="flex-1 resize-none bg-background text-foreground border-none outline-none p-5 text-sm leading-relaxed min-h-[500px]"
+          style={{ fontFamily: "'Fira Code', 'Cascadia Code', monospace", tabSize: 2 }}
         />
       )}
     </div>

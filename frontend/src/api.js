@@ -135,6 +135,10 @@ export const superAdminDeleteOrg  = (orgId) => api.delete(`/superadmin/orgs/${or
 export const superAdminPromote    = (uid) => api.post(`/superadmin/users/${uid}/superadmin`).then(r => r.data)
 export const superAdminDemote     = (uid) => api.delete(`/superadmin/users/${uid}/superadmin`).then(r => r.data)
 
+// ── AI inline edit ────────────────────────────────────────────────────────────
+export const aiInlineEdit = (text, instruction) =>
+  api.post('/ai/inline-edit', { text, instruction }).then(r => r.data)
+
 // ── Folders ───────────────────────────────────────────────────────────────────
 export const listFolders      = () => api.get('/files/folders').then(r => r.data)
 export const createFolder     = (name) => api.post('/files/folders', { name }).then(r => r.data)

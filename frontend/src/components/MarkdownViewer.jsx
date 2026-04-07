@@ -2,7 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import mermaid from 'mermaid'
-import { getFileContent, saveFileContent, getDriveFileContent, saveDriveFileContent } from '../api'
+import DOMPurify from 'dompurify'
+import { getFileContent, saveFileContent, getDriveFileContent, saveDriveFileContent, aiInlineEdit } from '../api'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 mermaid.initialize({ startOnLoad: false, theme: 'dark', darkMode: true })
 
@@ -13,18 +16,21 @@ function MermaidBlock({ code }) {
   useEffect(() => {
     const id = 'mermaid-' + Math.random().toString(36).slice(2)
     mermaid.render(id, code)
-      .then(({ svg }) => setSvg(svg))
+      .then(({ svg }) => setSvg(DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, ADD_TAGS: ['style', 'foreignObject', 'div', 'span'], ADD_ATTR: ['xmlns', 'dominant-baseline', 'requiredFeatures'] })))
       .catch(e => setError(e.message || 'Diagram error'))
+      .finally(() => {
+        document.getElementById(`d${id}`)?.remove()
+        document.getElementById(id)?.remove()
+      })
   }, [code])
 
   if (error) return (
-    <pre style={{ color: 'var(--danger)', background: 'var(--surface2)', padding: '0.75rem', borderRadius: 6, fontSize: '0.8125rem' }}>
+    <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive font-mono">
       Mermaid error: {error}
-    </pre>
+    </div>
   )
   return (
-    <div style={{ overflowX: 'auto', margin: '1rem 0', textAlign: 'center' }}
-      dangerouslySetInnerHTML={{ __html: svg }} />
+    <div className="overflow-x-auto my-4 text-center" dangerouslySetInnerHTML={{ __html: svg }} />
   )
 }
 
@@ -45,18 +51,155 @@ function Preview({ content }) {
   )
 }
 
+const AI_ACTIONS = [
+  { label: 'Improve',     instruction: 'Improve the clarity and quality of this text while keeping the same meaning and markdown formatting.' },
+  { label: 'Shorter',     instruction: 'Make this text more concise. Remove redundancy but keep all key information and markdown formatting.' },
+  { label: 'Longer',      instruction: 'Expand this text with more detail and depth. Keep the same markdown formatting style.' },
+  { label: 'Fix grammar', instruction: 'Fix any grammar, spelling, and punctuation issues. Do not change the meaning or structure.' },
+  { label: 'Simplify',    instruction: 'Rewrite this in simpler, plainer language that is easy to understand. Keep markdown formatting.' },
+]
+
+function AIEditPopover({ anchor, selectedText, onApply, onClose }) {
+  const [custom, setCustom]           = useState('')
+  const [loading, setLoading]         = useState(false)
+  const [error, setError]             = useState('')
+  const [preview, setPreview]         = useState(null)
+  const popRef = useRef()
+
+  const posStyle = {
+    position: 'fixed',
+    top: Math.max(8, anchor.y - 8),
+    left: Math.max(8, Math.min(anchor.x, window.innerWidth - 360 - 8)),
+    transform: 'translateY(-100%)',
+    zIndex: 1000,
+    width: 340,
+  }
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (popRef.current && !popRef.current.contains(e.target)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  const run = async (instruction) => {
+    setLoading(true)
+    setError('')
+    setPreview(null)
+    try {
+      const { result } = await aiInlineEdit(selectedText, instruction)
+      setPreview(result)
+    } catch (e) {
+      setError(e?.response?.data?.error || 'AI request failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div
+      ref={popRef}
+      style={posStyle}
+      className="rounded-xl border border-border bg-card shadow-2xl p-3 flex flex-col gap-2"
+      onMouseDown={e => e.stopPropagation()}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-sky-400 flex items-center gap-1">
+          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path d="M12 3L9.5 9.5 3 12l6.5 2.5L12 21l2.5-6.5L21 12l-6.5-2.5z"/>
+          </svg>
+          AI Edit
+        </span>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground leading-none px-0.5 text-base bg-transparent border-none cursor-pointer">×</button>
+      </div>
+
+      {/* Quick actions */}
+      {!preview && (
+        <div className="flex flex-wrap gap-1">
+          {AI_ACTIONS.map(a => (
+            <button
+              key={a.label}
+              disabled={loading}
+              onClick={() => run(a.instruction)}
+              className="text-[0.72rem] px-2 py-1 bg-muted border border-border text-foreground rounded-md cursor-pointer disabled:opacity-50 hover:bg-muted/80 transition-colors"
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Custom instruction */}
+      {!preview && (
+        <div className="flex gap-1.5">
+          <input
+            value={custom}
+            onChange={e => setCustom(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && custom.trim()) run(custom.trim()) }}
+            placeholder="Custom instruction…"
+            disabled={loading}
+            className="flex-1 text-[0.8rem] px-2 py-1.5 bg-background border border-border text-foreground rounded-md outline-none focus:border-ring disabled:opacity-50"
+          />
+          <button
+            disabled={loading || !custom.trim()}
+            onClick={() => run(custom.trim())}
+            className="px-2.5 text-xs bg-sky-400 text-white rounded-md cursor-pointer disabled:opacity-50 hover:bg-sky-500 transition-colors"
+          >
+            {loading ? '…' : '→'}
+          </button>
+        </div>
+      )}
+
+      {/* Loading */}
+      {loading && (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="h-3 w-3 animate-spin rounded-full border-2 border-border border-t-primary" /> Thinking…
+        </div>
+      )}
+
+      {/* Error */}
+      {error && <div className="text-xs text-destructive">{error}</div>}
+
+      {/* Preview + accept/reject */}
+      {preview && (
+        <>
+          <div className="text-[0.78rem] text-muted-foreground bg-muted border border-border rounded-md px-2.5 py-2 max-h-40 overflow-y-auto whitespace-pre-wrap font-mono leading-relaxed">
+            {preview}
+          </div>
+          <div className="flex gap-1.5 justify-end">
+            <button
+              onClick={() => setPreview(null)}
+              className="text-xs px-2.5 py-1.5 bg-muted border border-border text-muted-foreground rounded-md cursor-pointer hover:text-foreground"
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => onApply(preview)}
+              className="text-xs px-3 py-1.5 bg-sky-400 text-white rounded-md cursor-pointer hover:bg-sky-500 transition-colors"
+            >
+              Apply
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 const TOOLBAR = [
-  { label: 'B',   style: { fontWeight: 700 },      wrap: ['**', '**'],   title: 'Bold' },
-  { label: 'I',   style: { fontStyle: 'italic' },   wrap: ['_', '_'],     title: 'Italic' },
-  { label: '`',   style: { fontFamily: 'monospace'},wrap: ['`', '`'],     title: 'Inline code' },
-  { label: 'H1',  style: {},                        prefix: '# ',         title: 'Heading 1' },
-  { label: 'H2',  style: {},                        prefix: '## ',        title: 'Heading 2' },
-  { label: 'H3',  style: {},                        prefix: '### ',       title: 'Heading 3' },
-  { label: '—',   style: {},                        insert: '\n---\n',    title: 'Horizontal rule' },
-  { label: '≡',   style: {},                        prefix: '- ',         title: 'List item' },
-  { label: '☐',   style: {},                        prefix: '- [ ] ',     title: 'Task item' },
-  { label: '❝',   style: {},                        prefix: '> ',         title: 'Blockquote' },
-  { label: '⌥',   style: { fontFamily: 'monospace'},block: '```\n',       title: 'Code block' },
+  { label: 'B',  labelClass: 'font-bold',   wrap: ['**', '**'],  title: 'Bold' },
+  { label: 'I',  labelClass: 'italic',       wrap: ['_', '_'],    title: 'Italic' },
+  { label: '`',  labelClass: 'font-mono',    wrap: ['`', '`'],    title: 'Inline code' },
+  { label: 'H1', labelClass: '',             prefix: '# ',        title: 'Heading 1' },
+  { label: 'H2', labelClass: '',             prefix: '## ',       title: 'Heading 2' },
+  { label: 'H3', labelClass: '',             prefix: '### ',      title: 'Heading 3' },
+  { label: '—',  labelClass: '',             insert: '\n---\n',   title: 'Horizontal rule' },
+  { label: '≡',  labelClass: '',             prefix: '- ',        title: 'List item' },
+  { label: '☐',  labelClass: '',             prefix: '- [ ] ',   title: 'Task item' },
+  { label: '❝',  labelClass: '',             prefix: '> ',        title: 'Blockquote' },
+  { label: '⌥',  labelClass: 'font-mono',    block: '```\n',      title: 'Code block' },
 ]
 
 export default function MarkdownViewer({ file, onToast }) {
@@ -65,6 +208,7 @@ export default function MarkdownViewer({ file, onToast }) {
   const [mode, setMode]       = useState('view') // 'view' | 'edit' | 'split'
   const [saving, setSaving]   = useState(false)
   const [loading, setLoading] = useState(false)
+  const [aiPopover, setAiPopover] = useState(null)
   const textareaRef = useRef()
 
   useEffect(() => {
@@ -98,7 +242,29 @@ export default function MarkdownViewer({ file, onToast }) {
 
   const handleDiscard = () => setDraft(content)
 
-  // Toolbar action: insert wrap/prefix/block around selection
+  const handleTextareaMouseUp = useCallback((e) => {
+    const ta = textareaRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const end   = ta.selectionEnd
+    if (end <= start) { setAiPopover(null); return }
+    const text = draft.slice(start, end).trim()
+    if (!text) { setAiPopover(null); return }
+    setAiPopover({ x: e.clientX, y: e.clientY, start, end, text })
+  }, [draft])
+
+  const handleAiApply = useCallback((result) => {
+    if (!aiPopover) return
+    const { start, end } = aiPopover
+    const next = draft.slice(0, start) + result + draft.slice(end)
+    setDraft(next)
+    setAiPopover(null)
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current
+      if (ta) { ta.focus(); ta.setSelectionRange(start, start + result.length) }
+    })
+  }, [aiPopover, draft])
+
   const applyFormat = useCallback((action) => {
     const ta = textareaRef.current
     if (!ta) return
@@ -112,7 +278,6 @@ export default function MarkdownViewer({ file, onToast }) {
       next = draft.slice(0, start) + open + sel + close + draft.slice(end)
       cursor = sel ? end + open.length + close.length : start + open.length
     } else if (action.prefix) {
-      // Apply to each selected line
       const before = draft.slice(0, start)
       const after  = draft.slice(end)
       const lines  = sel || ''
@@ -130,20 +295,17 @@ export default function MarkdownViewer({ file, onToast }) {
     }
 
     setDraft(next)
-    // Restore focus + cursor after React re-render
     requestAnimationFrame(() => {
       ta.focus()
       ta.setSelectionRange(cursor, cursor)
     })
   }, [draft])
 
-  // Keyboard shortcuts in textarea
   const handleKeyDown = (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault()
       handleSave()
     }
-    // Tab → insert 2 spaces
     if (e.key === 'Tab') {
       e.preventDefault()
       const ta = e.target
@@ -155,8 +317,8 @@ export default function MarkdownViewer({ file, onToast }) {
   }
 
   if (loading) return (
-    <div className="card">
-      <div className="loading-overlay"><span className="spinner" /> Loading...</div>
+    <div className="flex items-center justify-center p-12 rounded-xl border border-border bg-card">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-primary" />
     </div>
   )
 
@@ -165,72 +327,61 @@ export default function MarkdownViewer({ file, onToast }) {
   const inEdit = mode === 'edit' || mode === 'split'
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+    <div className="flex flex-col rounded-xl border border-border bg-card overflow-hidden">
       {/* Header */}
-      <div className="card-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
-          <h2 style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</h2>
-          {isDirty && <span style={{ fontSize: '0.7rem', color: 'var(--muted)', flexShrink: 0 }}>● unsaved</span>}
+      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
+        <div className="flex items-center gap-2 min-w-0">
+          <h2 className="text-sm font-semibold truncate">{file.name}</h2>
+          {isDirty && <span className="text-[0.7rem] text-muted-foreground shrink-0">● unsaved</span>}
         </div>
-        <div style={{ display: 'flex', gap: '0.375rem', alignItems: 'center', flexShrink: 0 }}>
-          {/* Mode toggle */}
-          {['view','split','edit'].map(m => (
-            <button
+        <div className="flex gap-1.5 items-center shrink-0">
+          {['view', 'split', 'edit'].map(m => (
+            <Button
               key={m}
+              size="xs"
+              variant={mode === m ? 'default' : 'outline'}
               onClick={() => setMode(m)}
-              style={{
-                padding: '0.3rem 0.65rem',
-                fontSize: '0.75rem',
-                background: mode === m ? 'var(--accent)' : 'var(--surface2)',
-                color: mode === m ? 'white' : 'var(--muted)',
-                border: '1px solid ' + (mode === m ? 'var(--accent)' : 'var(--border)'),
-              }}
+              className={mode === m ? 'bg-sky-400 hover:bg-sky-500 border-sky-400' : ''}
             >
               {m === 'view' ? 'Preview' : m === 'split' ? 'Split' : 'Edit'}
-            </button>
+            </Button>
           ))}
           {isDirty && (
             <>
-              <button onClick={handleDiscard} style={{ background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', padding: '0.3rem 0.65rem', fontSize: '0.75rem' }}>
-                Discard
-              </button>
-              <button onClick={handleSave} disabled={saving} className="btn-primary" style={{ padding: '0.3rem 0.75rem', fontSize: '0.75rem' }}>
+              <Button size="xs" variant="ghost" onClick={handleDiscard}>Discard</Button>
+              <Button size="xs" onClick={handleSave} disabled={saving}
+                className="bg-sky-400 hover:bg-sky-500 text-white">
                 {saving ? 'Saving…' : 'Save'}
-              </button>
+              </Button>
             </>
           )}
         </div>
       </div>
 
-      {/* Toolbar (edit / split) */}
+      {/* Toolbar */}
       {inEdit && (
-        <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', padding: '0.5rem 1rem', borderBottom: '1px solid var(--border)', background: 'var(--surface2)' }}>
+        <div className="flex flex-wrap gap-1 px-4 py-2 border-b border-border bg-muted/50 items-center">
           {TOOLBAR.map((t, i) => (
             <button
               key={i}
               title={t.title}
               onClick={() => applyFormat(t)}
-              style={{
-                ...t.style,
-                padding: '0.2rem 0.55rem',
-                fontSize: '0.8125rem',
-                background: 'var(--surface)',
-                color: 'var(--text)',
-                border: '1px solid var(--border)',
-                minWidth: 30,
-              }}
+              className={cn(
+                'px-2 py-0.5 text-[0.8125rem] bg-card text-foreground border border-border rounded min-w-[30px] hover:bg-muted transition-colors',
+                t.labelClass
+              )}
             >
               {t.label}
             </button>
           ))}
-          <span style={{ marginLeft: 'auto', fontSize: '0.7rem', color: 'var(--muted)', alignSelf: 'center' }}>
+          <span className="ml-auto text-[0.7rem] text-muted-foreground">
             {navigator.platform.includes('Mac') ? '⌘S' : 'Ctrl+S'} to save
           </span>
         </div>
       )}
 
       {/* Body */}
-      <div style={{ display: 'grid', gridTemplateColumns: mode === 'split' ? '1fr 1fr' : '1fr', flex: 1, minHeight: 0 }}>
+      <div className={cn('grid flex-1 min-h-0', mode === 'split' ? 'grid-cols-2' : 'grid-cols-1')}>
         {/* Editor pane */}
         {inEdit && (
           <textarea
@@ -238,32 +389,33 @@ export default function MarkdownViewer({ file, onToast }) {
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={handleKeyDown}
+            onMouseUp={handleTextareaMouseUp}
             spellCheck={false}
-            style={{
-              flex: 1,
-              resize: 'none',
-              background: 'var(--bg)',
-              color: 'var(--text)',
-              border: 'none',
-              borderRight: mode === 'split' ? '1px solid var(--border)' : 'none',
-              outline: 'none',
-              padding: '1.25rem',
-              fontFamily: "'Fira Code', 'Cascadia Code', monospace",
-              fontSize: '0.875rem',
-              lineHeight: 1.7,
-              minHeight: 500,
-              tabSize: 2,
-            }}
+            className={cn(
+              'flex-1 resize-none bg-background text-foreground border-none outline-none p-5',
+              'font-mono text-sm leading-relaxed min-h-[500px] tab-[2]',
+              mode === 'split' && 'border-r border-border'
+            )}
+            style={{ fontFamily: "'Fira Code', 'Cascadia Code', monospace", tabSize: 2 }}
           />
         )}
 
         {/* Preview pane */}
         {(mode === 'view' || mode === 'split') && (
-          <div style={{ padding: '1.25rem', overflowY: 'auto', minHeight: mode === 'split' ? 500 : undefined }}>
+          <div className="p-5 overflow-y-auto" style={{ minHeight: mode === 'split' ? 500 : undefined }}>
             <Preview content={draft ?? content} />
           </div>
         )}
       </div>
+
+      {aiPopover && (
+        <AIEditPopover
+          anchor={{ x: aiPopover.x, y: aiPopover.y }}
+          selectedText={aiPopover.text}
+          onApply={handleAiApply}
+          onClose={() => setAiPopover(null)}
+        />
+      )}
     </div>
   )
 }
