@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getAuthConfig, authRegister, authLogin, startGoogleAuth } from '../api'
+import { getAuthConfig, authRegister, authLogin, authMe, startGoogleAuth } from '../api'
 
 function IconLink() {
   return <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
@@ -37,17 +37,15 @@ export default function AuthPage({ onAuth }) {
     setError('')
     setLoading(true)
     try {
-      let user
       if (mode === 'login') {
         const r = await authLogin(email, password)
         localStorage.setItem('mdf_token', r.token)
-        user = r.user
       } else {
         if (!name.trim()) { setError('Name is required'); setLoading(false); return }
         const r = await authRegister(email, name, password)
         localStorage.setItem('mdf_token', r.token)
-        user = r.user
       }
+      const user = await authMe()
       onAuth(user)
     } catch (e) {
       setError(e?.response?.data?.error || 'Something went wrong')
