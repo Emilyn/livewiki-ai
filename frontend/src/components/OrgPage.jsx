@@ -31,7 +31,7 @@ function RoleBadge({ role }) {
   return (
     <Badge
       variant={role === 'admin' ? 'default' : 'secondary'}
-      className={role === 'admin' ? 'bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 hover:bg-indigo-500/10' : ''}
+      className={role === 'admin' ? 'bg-sky-400/10 text-sky-400 border border-sky-400/20 hover:bg-sky-400/10' : ''}
     >
       {role}
     </Badge>
@@ -43,7 +43,7 @@ function Avatar({ user }) {
     return <img src={user.avatar_url} alt={user.name} referrerPolicy="no-referrer" className="h-7 w-7 rounded-full object-cover shrink-0" />
   }
   return (
-    <div className="h-7 w-7 rounded-full bg-indigo-500 flex items-center justify-center text-xs font-bold text-white shrink-0">
+    <div className="h-7 w-7 rounded-full bg-sky-400 flex items-center justify-center text-xs font-bold text-white shrink-0">
       {user.name?.[0]?.toUpperCase() ?? '?'}
     </div>
   )
@@ -324,7 +324,7 @@ function OrgDetail({ org, currentUserId, onToast }) {
     <div className="space-y-4 min-w-0">
       {/* Org header */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="h-9 w-9 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0 text-indigo-500">
+        <div className="h-9 w-9 rounded-lg bg-sky-400/10 border border-sky-400/20 flex items-center justify-center shrink-0 text-sky-400">
           <IconOrg size={18} />
         </div>
         <div>
@@ -344,7 +344,7 @@ function OrgDetail({ org, currentUserId, onToast }) {
             className={cn(
               'px-3.5 py-2 text-sm font-medium transition-colors border-b-2 -mb-px',
               activeTab === t.id
-                ? 'border-indigo-500 text-indigo-500'
+                ? 'border-sky-400 text-sky-400'
                 : 'border-transparent text-muted-foreground hover:text-foreground'
             )}
           >
@@ -416,7 +416,7 @@ export default function OrgPage({ user, onToast }) {
             className={cn(
               'w-full flex flex-col items-start rounded-lg px-2.5 py-2 text-sm transition-colors text-left',
               selectedOrgId === org.id
-                ? 'bg-indigo-500/10 text-indigo-500 border border-indigo-500/20'
+                ? 'bg-sky-400/10 text-sky-400 border border-sky-400/20'
                 : 'text-foreground hover:bg-muted border border-transparent'
             )}
           >

@@ -60,12 +60,9 @@ function IconCollapse({ size = 14 }) {
 }
 
 // ── Chat panel ────────────────────────────────────────────────────────────────
-function ChatPanel({ wikiSlug, onClose, expanded = false, onToggleExpand }) {
-  const [messages, setMessages] = useState([])
-  const [input, setInput]       = useState('')
-  const [loading, setLoading]   = useState(false)
-  const bottomRef               = useRef(null)
-  const inputRef                = useRef(null)
+function ChatPanel({ wikiSlug, onClose, expanded = false, onToggleExpand, messages, setMessages, input, setInput, loading, setLoading }) {
+  const bottomRef = useRef(null)
+  const inputRef  = useRef(null)
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
   useEffect(() => { inputRef.current?.focus() }, [])
@@ -119,14 +116,14 @@ function ChatPanel({ wikiSlug, onClose, expanded = false, onToggleExpand }) {
           <div key={i} className={cn('flex gap-2.5 items-start', msg.role === 'user' && 'flex-row-reverse')}>
             <div className={cn(
               'h-7 w-7 rounded-full shrink-0 flex items-center justify-center text-xs font-bold border border-border',
-              msg.role === 'user' ? 'bg-indigo-500 text-white border-indigo-500' : 'bg-muted text-muted-foreground'
+              msg.role === 'user' ? 'bg-sky-400 text-white border-sky-400' : 'bg-muted text-muted-foreground'
             )}>
               {msg.role === 'user' ? 'U' : 'AI'}
             </div>
             <div className={cn(
               'max-w-[82%] rounded-xl px-3 py-2.5 text-sm border',
               msg.role === 'user'
-                ? 'bg-indigo-500/10 border-indigo-500/20'
+                ? 'bg-sky-400/10 border-sky-400/20'
                 : 'bg-muted border-border'
             )}>
               {msg.role === 'assistant' ? (
@@ -186,7 +183,7 @@ function MermaidBlock({ code }) {
   useEffect(() => {
     const id = 'mermaid-' + Math.random().toString(36).slice(2)
     mermaid.render(id, code)
-      .then(({ svg }) => setSvg(DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } })))
+      .then(({ svg }) => setSvg(DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, ADD_TAGS: ['style', 'foreignObject', 'div', 'span'], ADD_ATTR: ['xmlns', 'dominant-baseline', 'requiredFeatures'] })))
       .catch(() => setError('Invalid diagram syntax'))
       .finally(() => {
         document.getElementById(`d${id}`)?.remove()
@@ -223,8 +220,8 @@ function GeneratingOverlay({ repo, pages = DEFAULT_PAGE_TITLES }) {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[400px] gap-6 text-center p-6">
-      <div className="h-12 w-12 rounded-full bg-indigo-500/15 flex items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-[3px] border-border border-t-indigo-500" />
+      <div className="h-12 w-12 rounded-full bg-sky-400/15 flex items-center justify-center">
+        <div className="h-6 w-6 animate-spin rounded-full border-[3px] border-border border-t-sky-400" />
       </div>
       <div>
         <p className="font-semibold text-base mb-1">Generating wiki for {repo}</p>
@@ -236,7 +233,7 @@ function GeneratingOverlay({ repo, pages = DEFAULT_PAGE_TITLES }) {
             <div className={cn(
               'h-5 w-5 rounded-full shrink-0 flex items-center justify-center text-[10px] font-bold transition-all border',
               i < step ? 'bg-green-500 border-green-500 text-white'
-                : i === step ? 'bg-indigo-500 border-indigo-500 text-white'
+                : i === step ? 'bg-sky-400 border-sky-400 text-white'
                 : 'bg-muted border-border text-muted-foreground'
             )}>
               {i < step ? '✓' : i + 1}
@@ -245,7 +242,7 @@ function GeneratingOverlay({ repo, pages = DEFAULT_PAGE_TITLES }) {
               {title}
             </span>
             {i === step && (
-              <div className="h-3 w-3 ml-auto animate-spin rounded-full border-2 border-border border-t-indigo-500" />
+              <div className="h-3 w-3 ml-auto animate-spin rounded-full border-2 border-border border-t-sky-400" />
             )}
           </div>
         ))}
@@ -316,6 +313,9 @@ export default function WikiPage({ onToast }) {
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [showChat, setShowChat]       = useState(false)
   const [chatExpanded, setChatExpanded] = useState(false)
+  const [chatMessages, setChatMessages] = useState([])
+  const [chatInput, setChatInput]       = useState('')
+  const [chatLoading, setChatLoading]   = useState(false)
   const [expandedRepo, setExpandedRepo] = useState(null)
   const [branchInput, setBranchInput]   = useState('')
   const [pageSearch, setPageSearch]     = useState('')
@@ -379,7 +379,7 @@ export default function WikiPage({ onToast }) {
     } finally {
       setGenerating(false)
     }
-  }, [onToast])
+  }, [onToast, templates])
 
   const handleOpenWiki = (wiki) => {
     setActiveWiki(wiki)
@@ -447,7 +447,7 @@ export default function WikiPage({ onToast }) {
             <span className="font-semibold text-sm truncate">{activeWiki.repo}</span>
             <div className="flex gap-1 flex-wrap">
               {activeWiki.stack?.map(s => (
-                <span key={s} className="text-[11px] bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 rounded px-1.5 py-0.5">{s}</span>
+                <span key={s} className="text-[11px] bg-sky-400/10 text-sky-400 border border-sky-400/20 rounded px-1.5 py-0.5">{s}</span>
               ))}
               {activeWiki.has_custom_config && (
                 <span className="text-[11px] bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 rounded px-1.5 py-0.5">wiki.json</span>
@@ -527,7 +527,7 @@ export default function WikiPage({ onToast }) {
                       className={cn(
                         'flex items-center gap-2 w-full rounded-lg px-2.5 py-2 text-xs transition-colors text-left',
                         isActive
-                          ? 'bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 font-semibold'
+                          ? 'bg-sky-400/10 text-sky-400 border border-sky-400/20 font-semibold'
                           : 'text-foreground hover:bg-muted border border-transparent'
                       )}
                     >
@@ -544,7 +544,7 @@ export default function WikiPage({ onToast }) {
                   className={cn(
                     'flex items-center gap-2 w-full rounded-lg px-2.5 py-2 text-xs transition-colors text-left',
                     showChat
-                      ? 'bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 font-semibold'
+                      ? 'bg-sky-400/10 text-sky-400 border border-sky-400/20 font-semibold'
                       : 'text-muted-foreground hover:bg-muted border border-transparent hover:text-foreground'
                   )}
                 >
@@ -562,9 +562,12 @@ export default function WikiPage({ onToast }) {
             {showChat && chatExpanded
               ? <ChatPanel
                   wikiSlug={activeWiki.repo_slug}
-                  onClose={() => { setShowChat(false); setChatExpanded(false) }}
+                  onClose={() => { setShowChat(false); setChatExpanded(false); setChatMessages([]); setChatInput('') }}
                   expanded
                   onToggleExpand={() => setChatExpanded(false)}
+                  messages={chatMessages} setMessages={setChatMessages}
+                  input={chatInput} setInput={setChatInput}
+                  loading={chatLoading} setLoading={setChatLoading}
                 />
               : <WikiPageViewer wikiSlug={activeWiki.repo_slug} page={activePage} />
             }
@@ -575,9 +578,12 @@ export default function WikiPage({ onToast }) {
             <Card className="min-h-[500px] flex flex-col sticky top-4 max-h-[calc(100vh-8rem)] overflow-hidden">
               <ChatPanel
                 wikiSlug={activeWiki.repo_slug}
-                onClose={() => setShowChat(false)}
+                onClose={() => { setShowChat(false); setChatMessages([]); setChatInput('') }}
                 expanded={false}
                 onToggleExpand={() => setChatExpanded(true)}
+                messages={chatMessages} setMessages={setChatMessages}
+                input={chatInput} setInput={setChatInput}
+                loading={chatLoading} setLoading={setChatLoading}
               />
             </Card>
           )}
@@ -672,7 +678,7 @@ export default function WikiPage({ onToast }) {
                     key={r.id}
                     className={cn(
                       'rounded-lg border transition-colors',
-                      isExpanded ? 'border-indigo-500/30' : 'border-transparent'
+                      isExpanded ? 'border-sky-400/30' : 'border-transparent'
                     )}
                   >
                     <div
@@ -694,8 +700,8 @@ export default function WikiPage({ onToast }) {
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {r.private && <Badge variant="secondary" className="text-[10px]">private</Badge>}
-                        <span className="text-[11px] bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 rounded px-1.5 py-0.5">@{r.account}</span>
-                        <span className="text-xs text-indigo-500 font-medium">{isExpanded ? '▲' : 'Select →'}</span>
+                        <span className="text-[11px] bg-sky-400/10 border border-sky-400/20 text-sky-400 rounded px-1.5 py-0.5">@{r.account}</span>
+                        <span className="text-xs text-sky-400 font-medium">{isExpanded ? '▲' : 'Select →'}</span>
                       </div>
                     </div>
                     {isExpanded && (
@@ -769,7 +775,7 @@ export default function WikiPage({ onToast }) {
       ) : wikis.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-5 py-12 text-center">
-            <div className="h-14 w-14 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-500">
+            <div className="h-14 w-14 rounded-full bg-sky-400/10 flex items-center justify-center text-sky-400">
               <IconBook size={24} />
             </div>
             <div>
@@ -788,11 +794,11 @@ export default function WikiPage({ onToast }) {
           {wikis.map(wiki => (
             <div
               key={wiki.repo_slug}
-              className="rounded-xl border border-border bg-card cursor-pointer hover:border-indigo-500/40 transition-colors"
+              className="rounded-xl border border-border bg-card cursor-pointer hover:border-sky-400/40 transition-colors"
               onClick={() => handleOpenWiki(wiki)}
             >
               <div className="flex items-center gap-3.5 px-5 py-4">
-                <div className="h-10 w-10 rounded-lg bg-indigo-500/10 flex items-center justify-center shrink-0 text-indigo-500">
+                <div className="h-10 w-10 rounded-lg bg-sky-400/10 flex items-center justify-center shrink-0 text-sky-400">
                   <IconBook size={18} />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -808,7 +814,7 @@ export default function WikiPage({ onToast }) {
                     {wiki.stack?.length > 0 && (
                       <div className="flex gap-1">
                         {wiki.stack.map(s => (
-                          <span key={s} className="text-indigo-500 bg-indigo-500/8 border border-indigo-500/15 rounded px-1.5 py-0.5 text-[10px]">{s}</span>
+                          <span key={s} className="text-sky-400 bg-sky-400/8 border border-sky-400/15 rounded px-1.5 py-0.5 text-[10px]">{s}</span>
                         ))}
                       </div>
                     )}

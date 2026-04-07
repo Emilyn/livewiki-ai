@@ -15,7 +15,7 @@ function MermaidBlock({ code }) {
   useEffect(() => {
     const id = 'mermaid-' + Math.random().toString(36).slice(2)
     mermaid.render(id, code)
-      .then(({ svg }) => setSvg(DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } })))
+      .then(({ svg }) => setSvg(DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, ADD_TAGS: ['style', 'foreignObject', 'div', 'span'], ADD_ATTR: ['xmlns', 'dominant-baseline', 'requiredFeatures'] })))
       .catch(() => setError('Invalid diagram syntax'))
       .finally(() => {
         document.getElementById(`d${id}`)?.remove()
@@ -104,7 +104,7 @@ export default function SharedWikiPage({ token }) {
             {wiki.branch}
           </span>
           {wiki.stack?.map(s => (
-            <span key={s} className="text-[11px] bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 rounded px-1.5 py-0.5 shrink-0">{s}</span>
+            <span key={s} className="text-[11px] bg-sky-400/10 text-sky-400 border border-sky-400/20 rounded px-1.5 py-0.5 shrink-0">{s}</span>
           ))}
           {wiki.has_custom_config && (
             <span className="text-[11px] bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 rounded px-1.5 py-0.5 shrink-0">wiki.json</span>
@@ -134,7 +134,7 @@ export default function SharedWikiPage({ token }) {
               className={cn(
                 'flex items-center gap-2 w-full rounded-lg px-2.5 py-2 text-sm transition-colors text-left',
                 activePage?.id === page.id
-                  ? 'bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 font-semibold'
+                  ? 'bg-sky-400/10 text-sky-400 border border-sky-400/20 font-semibold'
                   : 'text-foreground hover:bg-muted border border-transparent'
               )}
             >

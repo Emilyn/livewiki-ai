@@ -131,7 +131,7 @@ export default function JsonViewer({ file, onToast }) {
               size="xs"
               variant={mode === m ? 'default' : 'outline'}
               onClick={() => setMode(m)}
-              className={mode === m ? 'bg-indigo-500 hover:bg-indigo-600 border-indigo-500' : ''}
+              className={mode === m ? 'bg-sky-400 hover:bg-sky-500 border-sky-400' : ''}
             >
               {m === 'view' ? 'View' : 'Edit'}
             </Button>
@@ -151,7 +151,7 @@ export default function JsonViewer({ file, onToast }) {
             <>
               <Button size="xs" variant="ghost" onClick={() => setDraft(raw)}>Discard</Button>
               <Button size="xs" onClick={handleSave} disabled={saving}
-                className="bg-indigo-500 hover:bg-indigo-600 text-white">
+                className="bg-sky-400 hover:bg-sky-500 text-white">
                 {saving ? 'Saving…' : 'Save'}
               </Button>
             </>

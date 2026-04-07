@@ -166,7 +166,7 @@ export default function FilePanel({ selectedFile, onSelect, onToast }) {
       className={cn(
         'flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer transition-colors group',
         selectedFile?.id === f.id
-          ? 'bg-indigo-500/10 border border-indigo-500/20'
+          ? 'bg-sky-400/10 border border-sky-400/20'
           : 'hover:bg-muted border border-transparent',
         draggingFile?.id === f.id && 'opacity-50'
       )}
@@ -176,7 +176,7 @@ export default function FilePanel({ selectedFile, onSelect, onToast }) {
       onDragEnd={() => { setDraggingFile(null); setDropTarget(null) }}
       style={{ cursor: 'grab' }}
     >
-      <span className={cn('shrink-0', selectedFile?.id === f.id ? 'text-indigo-500' : 'text-muted-foreground')}>
+      <span className={cn('shrink-0', selectedFile?.id === f.id ? 'text-sky-400' : 'text-muted-foreground')}>
         <IconFile />
       </span>
       <div className="flex-1 min-w-0">
@@ -222,14 +222,14 @@ export default function FilePanel({ selectedFile, onSelect, onToast }) {
             <div
               className={cn(
                 'flex flex-col items-center gap-2 rounded-xl border-2 border-dashed p-6 cursor-pointer transition-colors text-sm',
-                dragOver ? 'border-indigo-500 bg-indigo-500/5' : 'border-border hover:border-muted-foreground/40 hover:bg-muted/40'
+                dragOver ? 'border-sky-400 bg-sky-400/5' : 'border-border hover:border-muted-foreground/40 hover:bg-muted/40'
               )}
               onClick={() => !uploading && inputRef.current.click()}
               onDragOver={e => { e.preventDefault(); setDragOver(true) }}
               onDragLeave={() => setDragOver(false)}
               onDrop={handleDrop}
             >
-              <svg width="28" height="28" fill="none" viewBox="0 0 24 24" className="text-indigo-500" stroke="currentColor" strokeWidth="1.5">
+              <svg width="28" height="28" fill="none" viewBox="0 0 24 24" className="text-sky-400" stroke="currentColor" strokeWidth="1.5">
                 <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1"/>
                 <polyline points="16 6 12 2 8 6"/>
                 <line x1="12" y1="2" x2="12" y2="15"/>
@@ -311,7 +311,7 @@ export default function FilePanel({ selectedFile, onSelect, onToast }) {
                       <div
                         className={cn(
                           'flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer hover:bg-muted transition-colors',
-                          dropTarget === folder.id && 'ring-2 ring-indigo-500'
+                          dropTarget === folder.id && 'ring-2 ring-sky-400'
                         )}
                         onClick={() => toggleCollapse(folder.id)}
                         onDragOver={e => { if (draggingFile && draggingFile.folder_id !== folder.id) { e.preventDefault(); setDropTarget(folder.id) } }}
@@ -319,7 +319,7 @@ export default function FilePanel({ selectedFile, onSelect, onToast }) {
                         onDrop={e => { e.preventDefault(); handleFileDrop(folder.id) }}
                       >
                         <span className={cn('text-xs transition-transform text-muted-foreground', isCollapsed && '-rotate-90')}>▼</span>
-                        <svg width="13" height="13" fill="none" viewBox="0 0 24 24" className="text-indigo-500 shrink-0" stroke="currentColor" strokeWidth="2">
+                        <svg width="13" height="13" fill="none" viewBox="0 0 24 24" className="text-sky-400 shrink-0" stroke="currentColor" strokeWidth="2">
                           <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
                         </svg>
                         <span className="text-sm font-medium flex-1">{folder.name}</span>
@@ -353,7 +353,7 @@ export default function FilePanel({ selectedFile, onSelect, onToast }) {
                 {/* Unfiled files */}
                 {(unfiledFiles.length > 0 || (draggingFile && draggingFile.folder_id)) && (
                   <div
-                    className={cn('rounded-lg', dropTarget === '' && 'ring-2 ring-indigo-500')}
+                    className={cn('rounded-lg', dropTarget === '' && 'ring-2 ring-sky-400')}
                     onDragOver={e => { if (draggingFile?.folder_id) { e.preventDefault(); setDropTarget('') } }}
                     onDragLeave={() => setDropTarget(null)}
                     onDrop={e => { e.preventDefault(); handleFileDrop('') }}
@@ -361,7 +361,7 @@ export default function FilePanel({ selectedFile, onSelect, onToast }) {
                     {folders.length > 0 && (
                       <p className={cn(
                         'text-xs font-medium px-3 py-1.5 transition-colors',
-                        dropTarget === '' ? 'text-indigo-500' : 'text-muted-foreground'
+                        dropTarget === '' ? 'text-sky-400' : 'text-muted-foreground'
                       )}>
                         {dropTarget === '' ? 'Drop to remove from folder' : 'Unfiled'}
                       </p>

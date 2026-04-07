@@ -16,8 +16,12 @@ function MermaidBlock({ code }) {
   useEffect(() => {
     const id = 'mermaid-' + Math.random().toString(36).slice(2)
     mermaid.render(id, code)
-      .then(({ svg }) => setSvg(DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } })))
+      .then(({ svg }) => setSvg(DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, ADD_TAGS: ['style', 'foreignObject', 'div', 'span'], ADD_ATTR: ['xmlns', 'dominant-baseline', 'requiredFeatures'] })))
       .catch(e => setError(e.message || 'Diagram error'))
+      .finally(() => {
+        document.getElementById(`d${id}`)?.remove()
+        document.getElementById(id)?.remove()
+      })
   }, [code])
 
   if (error) return (
@@ -102,7 +106,7 @@ function AIEditPopover({ anchor, selectedText, onApply, onClose }) {
     >
       {/* Header */}
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-indigo-500 flex items-center gap-1">
+        <span className="text-xs font-semibold text-sky-400 flex items-center gap-1">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
             <path d="M12 3L9.5 9.5 3 12l6.5 2.5L12 21l2.5-6.5L21 12l-6.5-2.5z"/>
           </svg>
@@ -141,7 +145,7 @@ function AIEditPopover({ anchor, selectedText, onApply, onClose }) {
           <button
             disabled={loading || !custom.trim()}
             onClick={() => run(custom.trim())}
-            className="px-2.5 text-xs bg-indigo-500 text-white rounded-md cursor-pointer disabled:opacity-50 hover:bg-indigo-600 transition-colors"
+            className="px-2.5 text-xs bg-sky-400 text-white rounded-md cursor-pointer disabled:opacity-50 hover:bg-sky-500 transition-colors"
           >
             {loading ? '…' : '→'}
           </button>
@@ -173,7 +177,7 @@ function AIEditPopover({ anchor, selectedText, onApply, onClose }) {
             </button>
             <button
               onClick={() => onApply(preview)}
-              className="text-xs px-3 py-1.5 bg-indigo-500 text-white rounded-md cursor-pointer hover:bg-indigo-600 transition-colors"
+              className="text-xs px-3 py-1.5 bg-sky-400 text-white rounded-md cursor-pointer hover:bg-sky-500 transition-colors"
             >
               Apply
             </button>
@@ -337,7 +341,7 @@ export default function MarkdownViewer({ file, onToast }) {
               size="xs"
               variant={mode === m ? 'default' : 'outline'}
               onClick={() => setMode(m)}
-              className={mode === m ? 'bg-indigo-500 hover:bg-indigo-600 border-indigo-500' : ''}
+              className={mode === m ? 'bg-sky-400 hover:bg-sky-500 border-sky-400' : ''}
             >
               {m === 'view' ? 'Preview' : m === 'split' ? 'Split' : 'Edit'}
             </Button>
@@ -346,7 +350,7 @@ export default function MarkdownViewer({ file, onToast }) {
             <>
               <Button size="xs" variant="ghost" onClick={handleDiscard}>Discard</Button>
               <Button size="xs" onClick={handleSave} disabled={saving}
-                className="bg-indigo-500 hover:bg-indigo-600 text-white">
+                className="bg-sky-400 hover:bg-sky-500 text-white">
                 {saving ? 'Saving…' : 'Save'}
               </Button>
             </>

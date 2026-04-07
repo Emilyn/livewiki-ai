@@ -3052,6 +3052,8 @@ func wikiGenerate(c *gin.Context) {
 	// If nothing changed, return the cached wiki immediately
 	if existingMeta != nil && existingMeta.CommitSHA != "" && existingMeta.CommitSHA == commitSHA {
 		existingMeta.RegeneratedPages = []string{}
+		existingMeta.TemplateID = body.TemplateID // persist the newly selected template even when content is unchanged
+		wc.saveMeta(*existingMeta)
 		c.JSON(http.StatusOK, existingMeta)
 		return
 	}

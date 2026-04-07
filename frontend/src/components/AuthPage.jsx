@@ -74,7 +74,7 @@ export default function AuthPage({ onAuth }) {
       <div className="w-full max-w-sm space-y-5">
         {/* Brand */}
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-indigo-500 flex items-center justify-center text-white shrink-0">
+          <div className="h-10 w-10 rounded-xl bg-sky-400 flex items-center justify-center text-white shrink-0">
             <IconLink />
           </div>
           <div>

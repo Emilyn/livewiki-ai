@@ -200,7 +200,7 @@ export default function SettingsPage({ onToast }) {
         <Card>
           <CardHeader className="border-b">
             <div className="flex items-center gap-2">
-              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" className="text-indigo-500">
+              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" className="text-sky-400">
                 <path d="M12 2a10 10 0 110 20A10 10 0 0112 2zm0 0v4m0 14v-4m-7-7h4m10 0h-4"/>
               </svg>
               <CardTitle>AI Provider</CardTitle>
@@ -361,7 +361,7 @@ export default function SettingsPage({ onToast }) {
         <CardHeader className="border-b">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" className="text-indigo-500">
+              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" className="text-sky-400">
                 <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/>
                 <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
               </svg>

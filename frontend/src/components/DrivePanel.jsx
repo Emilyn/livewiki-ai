@@ -24,7 +24,7 @@ function formatDate(d) {
 
 function StepNum({ n }) {
   return (
-    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-500 text-xs font-bold text-white mt-0.5">
+    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-400 text-xs font-bold text-white mt-0.5">
       {n}
     </span>
   )
@@ -105,7 +105,7 @@ function FolderPicker({ onPick, onClose }) {
               onClick={() => onPick(f)}
               className="flex items-center gap-2.5 w-full rounded-lg px-3 py-2.5 text-sm hover:bg-muted transition-colors text-left"
             >
-              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" className="text-indigo-500 shrink-0">
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" className="text-sky-400 shrink-0">
                 <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
               </svg>
               <span className="flex-1 truncate">{f.name}</span>
@@ -254,7 +254,7 @@ export default function DrivePanel({ selectedFile, onSelect, onToast }) {
             </div>
             <p className="text-xs text-muted-foreground">
               Get these from{' '}
-              <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-indigo-500 hover:underline underline-offset-3">
+              <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline underline-offset-3">
                 Google Cloud Console → APIs &amp; Services → Credentials
               </a>
               {' '}→ OAuth 2.0 Client ID (Web application).
@@ -356,14 +356,14 @@ export default function DrivePanel({ selectedFile, onSelect, onToast }) {
                 <div
                   className={cn(
                     'flex flex-col items-center gap-2 rounded-xl border-2 border-dashed p-6 cursor-pointer transition-colors text-sm',
-                    dragOver ? 'border-indigo-500 bg-indigo-500/5' : 'border-border hover:border-muted-foreground/40 hover:bg-muted/40'
+                    dragOver ? 'border-sky-400 bg-sky-400/5' : 'border-border hover:border-muted-foreground/40 hover:bg-muted/40'
                   )}
                   onClick={() => !uploading && inputRef.current.click()}
                   onDragOver={e => { e.preventDefault(); setDragOver(true) }}
                   onDragLeave={() => setDragOver(false)}
                   onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files) }}
                 >
-                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24" className="text-indigo-500" stroke="currentColor" strokeWidth="1.5">
+                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24" className="text-sky-400" stroke="currentColor" strokeWidth="1.5">
                     <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1"/>
                     <polyline points="16 6 12 2 8 6"/>
                     <line x1="12" y1="2" x2="12" y2="15"/>
@@ -430,7 +430,7 @@ export default function DrivePanel({ selectedFile, onSelect, onToast }) {
                         className={cn(
                           'flex items-center gap-2.5 rounded-lg px-3 py-2.5 cursor-pointer transition-colors group',
                           selectedFile?.id === f.id
-                            ? 'bg-indigo-500/10 border border-indigo-500/20'
+                            ? 'bg-sky-400/10 border border-sky-400/20'
                             : 'hover:bg-muted border border-transparent'
                         )}
                         onClick={() => onSelect(f)}

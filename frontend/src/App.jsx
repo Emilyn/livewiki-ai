@@ -195,7 +195,7 @@ export default function App() {
               <Icon />
               <span className="flex-1">{label}</span>
               {id === 'viewer' && selectedFile && (
-                <span className="text-[10px] bg-indigo-500/20 text-indigo-400 rounded px-1.5 py-0.5 max-w-[80px] truncate">
+                <span className="text-[10px] bg-sky-400/20 text-sky-300 rounded px-1.5 py-0.5 max-w-[80px] truncate">
                   {selectedFile.name}
                 </span>
               )}
@@ -234,7 +234,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             {user.avatar_url
               ? <img className="h-7 w-7 rounded-full object-cover" src={user.avatar_url} alt={user.name} referrerPolicy="no-referrer" />
-              : <div className="h-7 w-7 rounded-full bg-indigo-500 flex items-center justify-center text-xs font-bold text-white shrink-0">
+              : <div className="h-7 w-7 rounded-full bg-sky-400 flex items-center justify-center text-xs font-bold text-white shrink-0">
                   {user.name?.[0]?.toUpperCase() ?? '?'}
                 </div>
             }

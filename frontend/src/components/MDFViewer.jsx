@@ -95,7 +95,7 @@ function FilePicker({ file, onSelect }) {
                     className={cn(
                       'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[0.8125rem] border-none cursor-pointer text-left transition-colors',
                       file?.id === f.id
-                        ? 'bg-indigo-500/10 text-indigo-500 font-semibold'
+                        ? 'bg-sky-400/10 text-sky-400 font-semibold'
                         : 'text-foreground bg-transparent hover:bg-muted'
                     )}
                   >
@@ -244,7 +244,7 @@ export default function MDFViewer({ file, onSelect, onToast }) {
                       className={cn(
                         'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md cursor-pointer transition-colors text-xs',
                         sel
-                          ? 'bg-indigo-500/10 text-indigo-500 border border-indigo-500/20'
+                          ? 'bg-sky-400/10 text-sky-400 border border-sky-400/20'
                           : isMaster
                             ? 'text-muted-foreground hover:bg-muted border border-transparent italic'
                             : 'text-foreground hover:bg-muted border border-transparent'
@@ -284,7 +284,7 @@ export default function MDFViewer({ file, onSelect, onToast }) {
                         className={cn(
                           'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs cursor-pointer transition-colors',
                           activeChart === c.key
-                            ? 'bg-indigo-500 text-white'
+                            ? 'bg-sky-400 text-white'
                             : 'bg-muted text-muted-foreground border border-border hover:text-foreground'
                         )}
                       >

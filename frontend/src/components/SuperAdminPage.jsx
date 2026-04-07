@@ -17,7 +17,7 @@ function IconTrash({ size = 14 }) {
 function StatCard({ icon, label, value }) {
   return (
     <div className="flex items-center gap-3.5 rounded-xl border border-border bg-card px-5 py-4">
-      <div className="h-9 w-9 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0 text-indigo-500">
+      <div className="h-9 w-9 rounded-lg bg-sky-400/10 border border-sky-400/20 flex items-center justify-center shrink-0 text-sky-400">
         {icon}
       </div>
       <div>
@@ -107,7 +107,7 @@ export default function SuperAdminPage({ user: currentUser, onToast }) {
             className={cn(
               'px-3.5 py-2 text-sm font-medium transition-colors border-b-2 -mb-px',
               activeTab === t.id
-                ? 'border-indigo-500 text-indigo-500'
+                ? 'border-sky-400 text-sky-400'
                 : 'border-transparent text-muted-foreground hover:text-foreground'
             )}
           >
@@ -122,7 +122,7 @@ export default function SuperAdminPage({ user: currentUser, onToast }) {
           {orgs?.length === 0 && <p className="text-sm text-muted-foreground py-4">No organizations found.</p>}
           {orgs?.map(org => (
             <div key={org.id} className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3">
-              <div className="h-7 w-7 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0 text-indigo-500">
+              <div className="h-7 w-7 rounded-lg bg-sky-400/10 border border-sky-400/20 flex items-center justify-center shrink-0 text-sky-400">
                 <IconOrg size={14} />
               </div>
               <div className="flex-1 min-w-0">
@@ -167,7 +167,7 @@ export default function SuperAdminPage({ user: currentUser, onToast }) {
             <div key={u.id} className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5">
               {u.avatar_url
                 ? <img src={u.avatar_url} alt={u.name} referrerPolicy="no-referrer" className="h-7 w-7 rounded-full object-cover shrink-0" />
-                : <div className="h-7 w-7 rounded-full bg-indigo-500 flex items-center justify-center text-xs font-bold text-white shrink-0">
+                : <div className="h-7 w-7 rounded-full bg-sky-400 flex items-center justify-center text-xs font-bold text-white shrink-0">
                     {u.name?.[0]?.toUpperCase() ?? '?'}
                   </div>
               }
@@ -176,7 +176,7 @@ export default function SuperAdminPage({ user: currentUser, onToast }) {
                   <span className="text-sm font-medium">{u.name}</span>
                   {u.id === currentUser?.id && <span className="text-xs text-muted-foreground">(you)</span>}
                   {u.is_super_admin && (
-                    <Badge className="text-[10px] bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 hover:bg-indigo-500/10">super admin</Badge>
+                    <Badge className="text-[10px] bg-sky-400/10 text-sky-400 border border-sky-400/20 hover:bg-sky-400/10">super admin</Badge>
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground">{u.email}</p>
@@ -192,7 +192,7 @@ export default function SuperAdminPage({ user: currentUser, onToast }) {
                 title={u.id === currentUser?.id ? 'Cannot change your own role' : u.is_super_admin ? 'Remove super admin' : 'Make super admin'}
                 className={cn(
                   'shrink-0',
-                  !u.is_super_admin && 'text-indigo-500 border-indigo-500/30 hover:bg-indigo-500/10'
+                  !u.is_super_admin && 'text-sky-400 border-sky-400/30 hover:bg-sky-400/10'
                 )}
               >
                 {togglingAdmin === u.id ? '…' : u.is_super_admin ? 'Revoke' : 'Make Admin'}

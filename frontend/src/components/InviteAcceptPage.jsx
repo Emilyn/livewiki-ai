@@ -82,7 +82,7 @@ export default function InviteAcceptPage({ token }) {
       <span className="text-muted-foreground"><IconOrg /></span>
       <div className="font-bold text-base">Invite unavailable</div>
       <p className="text-sm text-muted-foreground">{error}</p>
-      <a href="/" className="text-sm text-indigo-500 hover:underline underline-offset-3">Go to app →</a>
+      <a href="/" className="text-sm text-sky-400 hover:underline underline-offset-3">Go to app →</a>
     </Shell>
   )
 
@@ -112,7 +112,7 @@ export default function InviteAcceptPage({ token }) {
       {/* Invite context banner */}
       <div className="flex justify-center px-4 pt-8 pb-0">
         <div className="w-full max-w-sm rounded-xl border border-border bg-card px-4 py-3 flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0 text-indigo-500">
+          <div className="h-9 w-9 rounded-lg bg-sky-400/10 border border-sky-400/20 flex items-center justify-center shrink-0 text-sky-400">
             <IconOrg size={20} />
           </div>
           <div className="text-left">
@@ -141,7 +141,7 @@ export default function InviteAcceptPage({ token }) {
 
   return (
     <Shell>
-      <div className="h-14 w-14 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-500">
+      <div className="h-14 w-14 rounded-xl bg-sky-400/10 border border-sky-400/20 flex items-center justify-center text-sky-400">
         <IconOrg size={28} />
       </div>
       <div>
@@ -149,7 +149,7 @@ export default function InviteAcceptPage({ token }) {
         <p className="text-sm text-muted-foreground">
           <strong className="text-foreground">{invite.invited_by}</strong> has invited you to join
         </p>
-        <div className="font-bold text-xl mt-1 text-indigo-500">{invite.org_name}</div>
+        <div className="font-bold text-xl mt-1 text-sky-400">{invite.org_name}</div>
       </div>
 
       {invite.email && (
