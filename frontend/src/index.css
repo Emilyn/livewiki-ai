@@ -180,6 +180,75 @@
 .md-body a { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
 .md-body hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 
+/* ── MDEditor — VSCode Dark+ theme ───────────────────────────────────────── */
+[data-color-mode="dark"] .w-md-editor,
+[data-color-mode="dark"].w-md-editor {
+  /* GitHub Primer vars the editor reads for all colors */
+  --color-canvas-default: #1e1e1e;
+  --color-canvas-subtle: #252526;
+  --color-border-default: #3c3c3c;
+  --color-border-muted: #3c3c3c;
+  --color-fg-default: #d4d4d4;
+  --color-fg-muted: #858585;
+  --color-fg-subtle: #6e7681;
+  --color-accent-fg: #4ec9b0;
+  --color-neutral-muted: rgba(255,255,255,0.06);
+
+  box-shadow: none !important;
+  border: none !important;
+}
+.w-md-editor-toolbar {
+  background-color: #252526 !important;
+  border-bottom: 1px solid #3c3c3c !important;
+  padding: 4px 8px !important;
+}
+.w-md-editor-toolbar li button {
+  color: #cccccc !important;
+}
+.w-md-editor-toolbar li button:hover {
+  background-color: #3c3c3c !important;
+  color: #ffffff !important;
+}
+.w-md-editor-toolbar-divider {
+  background-color: #3c3c3c !important;
+}
+.w-md-editor-content {
+  background-color: #1e1e1e !important;
+}
+.w-md-editor-text,
+.w-md-editor-text-pre,
+.w-md-editor-text-pre > code {
+  color: #d4d4d4 !important;
+  background: #1e1e1e !important;
+}
+.w-md-editor-text-input {
+  color: #d4d4d4 !important;
+  caret-color: #d4d4d4 !important;
+  -webkit-text-fill-color: #d4d4d4 !important;
+}
+.w-md-editor-preview {
+  background-color: #1e1e1e !important;
+  border-left: 1px solid #3c3c3c !important;
+  padding: 1.25rem 1.5rem !important;
+}
+.w-md-editor-preview .wmde-markdown {
+  background-color: transparent !important;
+  color: #d4d4d4 !important;
+  font-size: 0.875rem !important;
+}
+.w-md-editor-bar { background-color: #3c3c3c !important; }
+/* Syntax highlighting — VSCode Dark+ palette */
+.w-md-editor-text-pre .token.heading   { color: #569cd6 !important; font-weight: 700 !important; }
+.w-md-editor-text-pre .token.bold      { color: #d4d4d4 !important; font-weight: 700 !important; }
+.w-md-editor-text-pre .token.italic    { color: #d4d4d4 !important; font-style: italic !important; }
+.w-md-editor-text-pre .token.code      { color: #ce9178 !important; }
+.w-md-editor-text-pre .token.url,
+.w-md-editor-text-pre .token.link      { color: #4ec9b0 !important; }
+.w-md-editor-text-pre .token.list      { color: #6796e6 !important; }
+.w-md-editor-text-pre .token.hr        { color: #4a4a4a !important; }
+.w-md-editor-text-pre .token.blockquote{ color: #6a9955 !important; }
+.w-md-editor-text-pre .token.strike    { color: #808080 !important; }
+
 @keyframes chat-bounce {
   0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
   40% { transform: translateY(-6px); opacity: 1; }

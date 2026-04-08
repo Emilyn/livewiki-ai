@@ -102,6 +102,8 @@ export const getGitLabContent = (repo, path, branch) =>
 export const listWikis      = () => api.get('/wiki').then(r => r.data)
 export const getWiki        = (slug) => api.get(`/wiki/${slug}`).then(r => r.data)
 export const getWikiPage    = (slug, pageId) => api.get(`/wiki/${slug}/page/${pageId}`).then(r => r.data)
+export const updateWikiPage = (slug, pageId, content) =>
+  api.put(`/wiki/${slug}/page/${pageId}`, content, { headers: { 'Content-Type': 'text/plain' } }).then(r => r.data)
 export const generateWikiV2 = (repo, branch, templateId, source) =>
   api.post('/wiki/generate', { repo, branch, template_id: templateId || undefined, source: source || 'github' }).then(r => r.data)
 export const deleteWikiV2   = (slug) => api.delete(`/wiki/${slug}`)
