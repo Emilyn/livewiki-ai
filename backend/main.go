@@ -2275,6 +2275,28 @@ func getWikiPage(c *gin.Context) {
 	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(content))
 }
 
+func updateWikiPage(c *gin.Context) {
+	slug := c.Param("slug")
+	pageID := c.Param("pageid")
+	uid := me(c).ID
+	wc := wikiCtx{dir: filepath.Join(userDir(uid), "wikis", slug)}
+	m := wc.loadMeta()
+	if m == nil { c.JSON(http.StatusNotFound, gin.H{"error": "wiki not found"}); return }
+	// Verify page exists in meta
+	found := false
+	for _, p := range m.Pages {
+		if p.ID == pageID { found = true; break }
+	}
+	if !found { c.JSON(http.StatusNotFound, gin.H{"error": "page not found"}); return }
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil { c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read body"}); return }
+	if err := wc.savePageContent(pageID, string(body)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save page"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "saved"})
+}
+
 func deleteWiki(c *gin.Context) {
 	slug := c.Param("slug")
 	uid := me(c).ID
@@ -3450,6 +3472,7 @@ func main() {
 		w.POST("/generate", wikiGenerate)
 		w.GET("/:slug", getWiki)
 		w.GET("/:slug/page/:pageid", getWikiPage)
+		w.PUT("/:slug/page/:pageid", updateWikiPage)
 		w.DELETE("/:slug", deleteWiki)
 		w.POST("/:slug/chat", wikiChat)
 

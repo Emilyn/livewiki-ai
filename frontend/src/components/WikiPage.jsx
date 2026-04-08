@@ -3,12 +3,13 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import mermaid from 'mermaid'
 import DOMPurify from 'dompurify'
+import MDEditor from '@uiw/react-md-editor'
 import {
   getGitHubStatus,
   listGitHubRepos,
   getGitLabStatus,
   listGitLabRepos,
-  listWikis, getWikiPage, generateWikiV2, deleteWikiV2, wikiChat,
+  listWikis, getWikiPage, updateWikiPage, generateWikiV2, deleteWikiV2, wikiChat,
   listTemplates,
 } from '../api'
 import { Button } from '@/components/ui/button'
@@ -57,6 +58,15 @@ function IconExpand({ size = 14 }) {
 }
 function IconCollapse({ size = 14 }) {
   return <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="10" y1="14" x2="3" y2="21"/><line x1="21" y1="3" x2="14" y2="10"/></svg>
+}
+function IconEdit({ size = 14 }) {
+  return <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+}
+function IconCheck({ size = 14 }) {
+  return <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+}
+function IconX({ size = 14 }) {
+  return <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 }
 
 // ── Chat panel ────────────────────────────────────────────────────────────────
@@ -252,19 +262,39 @@ function GeneratingOverlay({ repo, pages = DEFAULT_PAGE_TITLES }) {
 }
 
 // ── Wiki page viewer ──────────────────────────────────────────────────────────
-function WikiPageViewer({ wikiSlug, page }) {
+function WikiPageViewer({ wikiSlug, page, onToast }) {
   const [content, setContent] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!page) return
     setLoading(true)
     setContent(null)
+    setEditing(false)
     getWikiPage(wikiSlug, page.id)
       .then(text => setContent(typeof text === 'string' ? text : JSON.stringify(text)))
       .catch(() => setContent('Failed to load page content.'))
       .finally(() => setLoading(false))
   }, [wikiSlug, page?.id])
+
+  const handleEdit = () => { setDraft(content || ''); setEditing(true) }
+  const handleCancel = () => setEditing(false)
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await updateWikiPage(wikiSlug, page.id, draft)
+      setContent(draft)
+      setEditing(false)
+      onToast?.('Page saved')
+    } catch {
+      onToast?.('Failed to save page', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   if (!page) return (
     <div className="flex flex-col items-center justify-center h-full min-h-[300px] gap-3 text-muted-foreground">
@@ -282,12 +312,45 @@ function WikiPageViewer({ wikiSlug, page }) {
     </div>
   )
 
+  if (editing) return (
+    <div className="flex flex-col h-full min-h-0" data-color-mode="dark">
+      {/* Editor toolbar */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border shrink-0">
+        <span className="text-xs font-medium text-muted-foreground flex-1">{page.title}</span>
+        <Button variant="ghost" size="sm" className="h-7" onClick={handleCancel} disabled={saving}>
+          <IconX size={13} />
+        </Button>
+        <Button size="sm" className="h-7 flex items-center gap-1.5" onClick={handleSave} disabled={saving}>
+          {saving ? <div className="h-3 w-3 animate-spin rounded-full border-2 border-background border-t-transparent" /> : <IconCheck size={13} />}
+          Save
+        </Button>
+      </div>
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <MDEditor
+          value={draft}
+          onChange={v => setDraft(v || '')}
+          height="100%"
+          visibleDragbar={false}
+          extraCommands={[]}
+          style={{ height: '100%', borderRadius: 0, border: 'none' }}
+        />
+      </div>
+    </div>
+  )
+
   return (
-    <div className="p-6 overflow-y-auto">
-      <div className="md-body">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
-          {content || ''}
-        </ReactMarkdown>
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex items-center justify-end px-4 py-2 border-b border-border shrink-0">
+        <Button variant="ghost" size="sm" className="h-7 flex items-center gap-1.5 text-xs" onClick={handleEdit}>
+          <IconEdit size={12} /> Edit
+        </Button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="md-body">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
+            {content || ''}
+          </ReactMarkdown>
+        </div>
       </div>
     </div>
   )
@@ -570,7 +633,7 @@ export default function WikiPage({ onToast }) {
                   input={chatInput} setInput={setChatInput}
                   loading={chatLoading} setLoading={setChatLoading}
                 />
-              : <WikiPageViewer wikiSlug={activeWiki.repo_slug} page={activePage} />
+              : <WikiPageViewer wikiSlug={activeWiki.repo_slug} page={activePage} onToast={onToast} />
             }
           </Card>
 
