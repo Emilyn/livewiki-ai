@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -8,13 +9,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -29,87 +29,91 @@ type User struct {
 }
 
 type Store struct {
-	mu        sync.RWMutex
-	usersFile string
-	users     []User
-	secret    []byte
+	pool   *pgxpool.Pool
+	secret []byte
 }
 
-func NewStore(dataDir string) (*Store, error) {
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+func NewStore(pool *pgxpool.Pool) (*Store, error) {
+	s := &Store{pool: pool}
+	if err := s.initSecret(); err != nil {
 		return nil, err
 	}
-	s := &Store{usersFile: filepath.Join(dataDir, "users.json")}
-
-	secretFile := filepath.Join(dataDir, "jwt_secret")
-	if raw, err := os.ReadFile(secretFile); err == nil {
-		decoded, err := hex.DecodeString(strings.TrimSpace(string(raw)))
-		if err != nil {
-			return nil, err
-		}
-		s.secret = decoded
-	} else {
-		secret := make([]byte, 32)
-		if _, err := rand.Read(secret); err != nil {
-			return nil, err
-		}
-		_ = os.WriteFile(secretFile, []byte(hex.EncodeToString(secret)), 0600)
-		s.secret = secret
-	}
-
-	s.load()
 	return s, nil
 }
 
-func (s *Store) load() {
-	data, err := os.ReadFile(s.usersFile)
-	if err != nil {
-		s.users = nil
-		return
+func (s *Store) initSecret() error {
+	ctx := context.Background()
+	var secretHex string
+	err := s.pool.QueryRow(ctx, `SELECT secret FROM jwt_secret LIMIT 1`).Scan(&secretHex)
+	if err == pgx.ErrNoRows {
+		raw := make([]byte, 32)
+		if _, err := rand.Read(raw); err != nil {
+			return err
+		}
+		secretHex = hex.EncodeToString(raw)
+		_, err = s.pool.Exec(ctx, `INSERT INTO jwt_secret (secret) VALUES ($1)`, secretHex)
+		if err != nil {
+			return err
+		}
+		s.secret = raw
+		return nil
 	}
-	_ = json.Unmarshal(data, &s.users)
-}
-
-func (s *Store) save() {
-	data, _ := json.MarshalIndent(s.users, "", "  ")
-	_ = os.WriteFile(s.usersFile, data, 0600)
+	if err != nil {
+		return err
+	}
+	decoded, err := hex.DecodeString(strings.TrimSpace(secretHex))
+	if err != nil {
+		return err
+	}
+	s.secret = decoded
+	return nil
 }
 
 func (s *Store) FindByID(id string) *User {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for i := range s.users {
-		if s.users[i].ID == id {
-			u := s.users[i]
-			return &u
-		}
+	ctx := context.Background()
+	u := &User{}
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, email, name, password_hash, google_id, avatar_url, created_at FROM users WHERE id = $1`,
+		id,
+	).Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.GoogleID, &u.AvatarURL, &u.CreatedAt)
+	if err != nil {
+		return nil
 	}
-	return nil
+	return u
 }
 
 func (s *Store) FindByEmail(email string) *User {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	ctx := context.Background()
 	email = strings.ToLower(strings.TrimSpace(email))
-	return s.findByEmail(email)
+	u := &User{}
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, email, name, password_hash, google_id, avatar_url, created_at FROM users WHERE email = $1`,
+		email,
+	).Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.GoogleID, &u.AvatarURL, &u.CreatedAt)
+	if err != nil {
+		return nil
+	}
+	return u
 }
 
 func (s *Store) ListUsers() []User {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]User, len(s.users))
-	copy(out, s.users)
-	return out
-}
-
-func (s *Store) findByEmail(email string) *User {
-	for i := range s.users {
-		if s.users[i].Email == email {
-			u := s.users[i]
-			return &u
-		}
+	ctx := context.Background()
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, email, name, password_hash, google_id, avatar_url, created_at FROM users ORDER BY created_at`,
+	)
+	if err != nil {
+		return nil
 	}
-	return nil
+	defer rows.Close()
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.GoogleID, &u.AvatarURL, &u.CreatedAt); err != nil {
+			continue
+		}
+		users = append(users, u)
+	}
+	return users
 }
 
 func (s *Store) Register(email, name, password string) (*User, error) {
@@ -120,11 +124,6 @@ func (s *Store) Register(email, name, password string) (*User, error) {
 	}
 	if len(password) < 8 {
 		return nil, errors.New("password must be at least 8 characters")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.findByEmail(email) != nil {
-		return nil, errors.New("email already registered")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -137,16 +136,24 @@ func (s *Store) Register(email, name, password string) (*User, error) {
 		PasswordHash: string(hash),
 		CreatedAt:    time.Now(),
 	}
-	s.users = append(s.users, u)
-	s.save()
+	ctx := context.Background()
+	_, err = s.pool.Exec(ctx,
+		`INSERT INTO users (id, email, name, password_hash, google_id, avatar_url, created_at)
+         VALUES ($1, $2, $3, $4, '', '', $5)`,
+		u.ID, u.Email, u.Name, u.PasswordHash, u.CreatedAt,
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
+			return nil, errors.New("email already registered")
+		}
+		return nil, err
+	}
 	return &u, nil
 }
 
 func (s *Store) Login(email, password string) (*User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
-	s.mu.RLock()
-	u := s.findByEmail(email)
-	s.mu.RUnlock()
+	u := s.FindByEmail(email)
 	if u == nil {
 		return nil, errors.New("invalid email or password")
 	}
@@ -161,26 +168,41 @@ func (s *Store) Login(email, password string) (*User, error) {
 
 func (s *Store) UpsertGoogle(googleID, email, name, avatarURL string) (*User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.users {
-		if s.users[i].GoogleID == googleID {
-			u := s.users[i]
-			return &u, nil
-		}
+	ctx := context.Background()
+
+	// Check by google_id first
+	u := &User{}
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, email, name, password_hash, google_id, avatar_url, created_at FROM users WHERE google_id = $1`,
+		googleID,
+	).Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.GoogleID, &u.AvatarURL, &u.CreatedAt)
+	if err == nil {
+		return u, nil
 	}
-	for i := range s.users {
-		if s.users[i].Email == email {
-			s.users[i].GoogleID = googleID
-			if s.users[i].AvatarURL == "" && avatarURL != "" {
-				s.users[i].AvatarURL = avatarURL
-			}
-			s.save()
-			u := s.users[i]
-			return &u, nil
+
+	// Check by email
+	err = s.pool.QueryRow(ctx,
+		`SELECT id, email, name, password_hash, google_id, avatar_url, created_at FROM users WHERE email = $1`,
+		email,
+	).Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.GoogleID, &u.AvatarURL, &u.CreatedAt)
+	if err == nil {
+		// Update google_id and optionally avatar
+		_, err = s.pool.Exec(ctx,
+			`UPDATE users SET google_id = $1, avatar_url = CASE WHEN avatar_url = '' THEN $2 ELSE avatar_url END WHERE id = $3`,
+			googleID, avatarURL, u.ID,
+		)
+		if err != nil {
+			return nil, err
 		}
+		u.GoogleID = googleID
+		if u.AvatarURL == "" {
+			u.AvatarURL = avatarURL
+		}
+		return u, nil
 	}
-	u := User{
+
+	// Create new user
+	newUser := User{
 		ID:        uuid.New().String(),
 		Email:     email,
 		Name:      name,
@@ -188,9 +210,15 @@ func (s *Store) UpsertGoogle(googleID, email, name, avatarURL string) (*User, er
 		AvatarURL: avatarURL,
 		CreatedAt: time.Now(),
 	}
-	s.users = append(s.users, u)
-	s.save()
-	return &u, nil
+	_, err = s.pool.Exec(ctx,
+		`INSERT INTO users (id, email, name, password_hash, google_id, avatar_url, created_at)
+         VALUES ($1, $2, $3, '', $4, $5, $6)`,
+		newUser.ID, newUser.Email, newUser.Name, newUser.GoogleID, newUser.AvatarURL, newUser.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &newUser, nil
 }
 
 type tokenClaims struct {
