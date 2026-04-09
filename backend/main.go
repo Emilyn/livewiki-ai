@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -19,14 +20,17 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"livewiki/auth"
+	dbpkg "livewiki/db"
 	"livewiki/drive"
 	"livewiki/mdf"
 )
 
 var uploadsDir string
+var pool *pgxpool.Pool
 var driveClient *drive.Client
 var activeRedirectURI string
 var authStore *auth.Store
@@ -44,7 +48,12 @@ func init() {
 	os.MkdirAll(uploadsDir, 0755)
 
 	var err error
-	authStore, err = auth.NewStore(uploadsDir)
+	pool, err = dbpkg.Connect(context.Background(), os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+
+	authStore, err = auth.NewStore(pool)
 	if err != nil {
 		log.Fatalf("failed to init auth store: %v", err)
 	}
@@ -159,13 +168,14 @@ var validOpenAIModels = map[string]bool{
 }
 
 func loadSettings(uid string) UserSettings {
-	path := filepath.Join(userDir(uid), "settings.json")
-	data, err := os.ReadFile(path)
+	var s UserSettings
+	err := pool.QueryRow(context.Background(),
+		`SELECT anthropic_api_key, model, openai_api_key, openai_model, ai_provider
+		 FROM user_settings WHERE user_id = $1`, uid,
+	).Scan(&s.AnthropicAPIKey, &s.Model, &s.OpenAIAPIKey, &s.OpenAIModel, &s.AIProvider)
 	if err != nil {
 		return UserSettings{Model: "claude-sonnet-4-6", AIProvider: "anthropic", OpenAIModel: "gpt-4o"}
 	}
-	var s UserSettings
-	json.Unmarshal(data, &s)
 	if s.Model == "" {
 		s.Model = "claude-sonnet-4-6"
 	}
@@ -176,6 +186,21 @@ func loadSettings(uid string) UserSettings {
 		s.OpenAIModel = "gpt-4o"
 	}
 	return s
+}
+
+func saveSettings(uid string, s UserSettings) error {
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO user_settings (user_id, anthropic_api_key, model, openai_api_key, openai_model, ai_provider)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 ON CONFLICT (user_id) DO UPDATE SET
+		   anthropic_api_key = EXCLUDED.anthropic_api_key,
+		   model             = EXCLUDED.model,
+		   openai_api_key    = EXCLUDED.openai_api_key,
+		   openai_model      = EXCLUDED.openai_model,
+		   ai_provider       = EXCLUDED.ai_provider`,
+		uid, s.AnthropicAPIKey, s.Model, s.OpenAIAPIKey, s.OpenAIModel, s.AIProvider,
+	)
+	return err
 }
 
 // ── Wiki storage ──────────────────────────────────────────────────────────────
@@ -227,32 +252,57 @@ type WikiTemplate struct {
 	UpdatedAt time.Time          `json:"updated_at"`
 }
 
-func templatesPath(uid string) string {
-	return filepath.Join(userDir(uid), "wiki_templates.json")
-}
-
 func loadTemplates(uid string) []WikiTemplate {
-	data, err := os.ReadFile(templatesPath(uid))
-	if err != nil { return []WikiTemplate{} }
+	rows, err := pool.Query(context.Background(),
+		`SELECT id, name, pages, created_at, updated_at FROM wiki_templates WHERE user_id = $1 ORDER BY created_at`, uid)
+	if err != nil {
+		return []WikiTemplate{}
+	}
+	defer rows.Close()
 	var ts []WikiTemplate
-	json.Unmarshal(data, &ts)
-	if ts == nil { return []WikiTemplate{} }
+	for rows.Next() {
+		var t WikiTemplate
+		var pagesJSON []byte
+		if err := rows.Scan(&t.ID, &t.Name, &pagesJSON, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			continue
+		}
+		json.Unmarshal(pagesJSON, &t.Pages)
+		ts = append(ts, t)
+	}
+	if ts == nil {
+		return []WikiTemplate{}
+	}
 	return ts
 }
 
-func saveTemplates(uid string, ts []WikiTemplate) {
-	data, _ := json.MarshalIndent(ts, "", "  ")
-	os.WriteFile(templatesPath(uid), data, 0644)
+func saveTemplate(uid string, t WikiTemplate) error {
+	pagesJSON, _ := json.Marshal(t.Pages)
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO wiki_templates (id, user_id, name, pages, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, pages = EXCLUDED.pages, updated_at = EXCLUDED.updated_at`,
+		t.ID, uid, t.Name, pagesJSON, t.CreatedAt, t.UpdatedAt,
+	)
+	return err
+}
+
+func deleteTemplate(uid, id string) error {
+	_, err := pool.Exec(context.Background(),
+		`DELETE FROM wiki_templates WHERE id = $1 AND user_id = $2`, id, uid)
+	return err
 }
 
 func findTemplate(uid, id string) *WikiTemplate {
-	for _, t := range loadTemplates(uid) {
-		if t.ID == id {
-			cp := t
-			return &cp
-		}
+	var t WikiTemplate
+	var pagesJSON []byte
+	err := pool.QueryRow(context.Background(),
+		`SELECT id, name, pages, created_at, updated_at FROM wiki_templates WHERE id = $1 AND user_id = $2`, id, uid,
+	).Scan(&t.ID, &t.Name, &pagesJSON, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		return nil
 	}
-	return nil
+	json.Unmarshal(pagesJSON, &t.Pages)
+	return &t
 }
 
 // ── Organizations ─────────────────────────────────────────────────────────────
@@ -281,116 +331,187 @@ type OrgInvite struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-func orgsBaseDir() string { return filepath.Join(uploadsDir, "orgs") }
-func orgDir(id string) string { return filepath.Join(orgsBaseDir(), id) }
-
 func loadOrg(id string) *Organization {
-	data, err := os.ReadFile(filepath.Join(orgDir(id), "meta.json"))
-	if err != nil { return nil }
 	var o Organization
-	if json.Unmarshal(data, &o) != nil { return nil }
+	err := pool.QueryRow(context.Background(),
+		`SELECT id, name, owner_id, is_personal, created_at FROM organizations WHERE id = $1`, id,
+	).Scan(&o.ID, &o.Name, &o.OwnerID, &o.IsPersonal, &o.CreatedAt)
+	if err != nil {
+		return nil
+	}
 	return &o
 }
 
 func saveOrg(o Organization) {
-	os.MkdirAll(orgDir(o.ID), 0755)
-	data, _ := json.MarshalIndent(o, "", "  ")
-	os.WriteFile(filepath.Join(orgDir(o.ID), "meta.json"), data, 0644)
+	pool.Exec(context.Background(),
+		`INSERT INTO organizations (id, name, owner_id, is_personal, created_at)
+		 VALUES ($1, $2, $3, $4, $5)
+		 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`,
+		o.ID, o.Name, o.OwnerID, o.IsPersonal, o.CreatedAt,
+	)
 }
 
 func loadOrgMembers(orgID string) []OrgMember {
-	data, err := os.ReadFile(filepath.Join(orgDir(orgID), "members.json"))
-	if err != nil { return []OrgMember{} }
-	var m []OrgMember
-	json.Unmarshal(data, &m)
-	if m == nil { return []OrgMember{} }
-	return m
+	rows, err := pool.Query(context.Background(),
+		`SELECT user_id, role, joined_at FROM org_members WHERE org_id = $1`, orgID)
+	if err != nil {
+		return []OrgMember{}
+	}
+	defer rows.Close()
+	var members []OrgMember
+	for rows.Next() {
+		var m OrgMember
+		if err := rows.Scan(&m.UserID, &m.Role, &m.JoinedAt); err != nil {
+			continue
+		}
+		members = append(members, m)
+	}
+	if members == nil {
+		return []OrgMember{}
+	}
+	return members
 }
 
 func saveOrgMembers(orgID string, members []OrgMember) {
-	data, _ := json.MarshalIndent(members, "", "  ")
-	os.WriteFile(filepath.Join(orgDir(orgID), "members.json"), data, 0644)
+	ctx := context.Background()
+	pool.Exec(ctx, `DELETE FROM org_members WHERE org_id = $1`, orgID)
+	for _, m := range members {
+		pool.Exec(ctx,
+			`INSERT INTO org_members (org_id, user_id, role, joined_at) VALUES ($1, $2, $3, $4)
+			 ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
+			orgID, m.UserID, m.Role, m.JoinedAt,
+		)
+	}
 }
 
 func loadOrgInvites(orgID string) []OrgInvite {
-	data, err := os.ReadFile(filepath.Join(orgDir(orgID), "invites.json"))
-	if err != nil { return []OrgInvite{} }
-	var inv []OrgInvite
-	json.Unmarshal(data, &inv)
-	if inv == nil { return []OrgInvite{} }
-	return inv
+	rows, err := pool.Query(context.Background(),
+		`SELECT id, org_id, email, invited_by, token, status, created_at, expires_at FROM org_invites WHERE org_id = $1`, orgID)
+	if err != nil {
+		return []OrgInvite{}
+	}
+	defer rows.Close()
+	var invites []OrgInvite
+	for rows.Next() {
+		var inv OrgInvite
+		if err := rows.Scan(&inv.ID, &inv.OrgID, &inv.Email, &inv.InvitedBy, &inv.Token, &inv.Status, &inv.CreatedAt, &inv.ExpiresAt); err != nil {
+			continue
+		}
+		invites = append(invites, inv)
+	}
+	if invites == nil {
+		return []OrgInvite{}
+	}
+	return invites
 }
 
 func saveOrgInvites(orgID string, invites []OrgInvite) {
-	data, _ := json.MarshalIndent(invites, "", "  ")
-	os.WriteFile(filepath.Join(orgDir(orgID), "invites.json"), data, 0644)
+	ctx := context.Background()
+	pool.Exec(ctx, `DELETE FROM org_invites WHERE org_id = $1`, orgID)
+	for _, inv := range invites {
+		pool.Exec(ctx,
+			`INSERT INTO org_invites (id, org_id, email, invited_by, token, status, created_at, expires_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			 ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status`,
+			inv.ID, inv.OrgID, inv.Email, inv.InvitedBy, inv.Token, inv.Status, inv.CreatedAt, inv.ExpiresAt,
+		)
+	}
 }
 
 func listAllOrgs() []Organization {
-	entries, err := os.ReadDir(orgsBaseDir())
-	if err != nil { return nil }
+	rows, err := pool.Query(context.Background(),
+		`SELECT id, name, owner_id, is_personal, created_at FROM organizations ORDER BY created_at`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
 	var orgs []Organization
-	for _, e := range entries {
-		if !e.IsDir() { continue }
-		if o := loadOrg(e.Name()); o != nil {
-			orgs = append(orgs, *o)
+	for rows.Next() {
+		var o Organization
+		if err := rows.Scan(&o.ID, &o.Name, &o.OwnerID, &o.IsPersonal, &o.CreatedAt); err != nil {
+			continue
 		}
+		orgs = append(orgs, o)
 	}
 	return orgs
 }
 
 func userOrgs(uid string) []Organization {
-	all := listAllOrgs()
+	rows, err := pool.Query(context.Background(),
+		`SELECT o.id, o.name, o.owner_id, o.is_personal, o.created_at
+		 FROM organizations o JOIN org_members m ON o.id = m.org_id
+		 WHERE m.user_id = $1 ORDER BY o.created_at`, uid)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
 	var out []Organization
-	for _, o := range all {
-		for _, m := range loadOrgMembers(o.ID) {
-			if m.UserID == uid {
-				out = append(out, o)
-				break
-			}
+	for rows.Next() {
+		var o Organization
+		if err := rows.Scan(&o.ID, &o.Name, &o.OwnerID, &o.IsPersonal, &o.CreatedAt); err != nil {
+			continue
 		}
+		out = append(out, o)
 	}
 	return out
 }
 
 func orgMemberRole(orgID, uid string) string {
-	for _, m := range loadOrgMembers(orgID) {
-		if m.UserID == uid { return m.Role }
+	var role string
+	err := pool.QueryRow(context.Background(),
+		`SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2`, orgID, uid,
+	).Scan(&role)
+	if err != nil {
+		return ""
 	}
-	return ""
+	return role
 }
 
-func superAdminsFilePath() string { return filepath.Join(uploadsDir, "super_admins.json") }
-
 func loadSuperAdminIDs() []string {
-	data, err := os.ReadFile(superAdminsFilePath())
-	if err != nil { return []string{} }
+	rows, err := pool.Query(context.Background(), `SELECT user_id FROM super_admins`)
+	if err != nil {
+		return []string{}
+	}
+	defer rows.Close()
 	var ids []string
-	json.Unmarshal(data, &ids)
-	if ids == nil { return []string{} }
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	if ids == nil {
+		return []string{}
+	}
 	return ids
 }
 
-func saveSuperAdminIDs(ids []string) {
-	data, _ := json.MarshalIndent(ids, "", "  ")
-	os.WriteFile(superAdminsFilePath(), data, 0644)
+func addSuperAdmin(uid string) {
+	pool.Exec(context.Background(),
+		`INSERT INTO super_admins (user_id) VALUES ($1) ON CONFLICT DO NOTHING`, uid)
+}
+
+func removeSuperAdmin(uid string) {
+	pool.Exec(context.Background(), `DELETE FROM super_admins WHERE user_id = $1`, uid)
 }
 
 func isSuperAdmin(user *auth.User) bool {
-	// Check env var (bootstrap)
 	sa := os.Getenv("SUPER_ADMIN_EMAIL")
-	if sa != "" && strings.EqualFold(user.Email, sa) { return true }
-	// Check stored super admin list
-	for _, id := range loadSuperAdminIDs() {
-		if id == user.ID { return true }
+	if sa != "" && strings.EqualFold(user.Email, sa) {
+		return true
 	}
-	return false
+	var exists bool
+	pool.QueryRow(context.Background(),
+		`SELECT EXISTS(SELECT 1 FROM super_admins WHERE user_id = $1)`, user.ID,
+	).Scan(&exists)
+	return exists
 }
 
 func ensurePersonalOrg(uid, name string) {
-	// Check if user already owns a personal org
 	for _, o := range userOrgs(uid) {
-		if o.OwnerID == uid { return }
+		if o.OwnerID == uid {
+			return
+		}
 	}
 	orgID := uuid.New().String()
 	org := Organization{ID: orgID, Name: name + "'s Workspace", OwnerID: uid, IsPersonal: true, CreatedAt: time.Now()}
@@ -398,55 +519,120 @@ func ensurePersonalOrg(uid, name string) {
 	saveOrgMembers(orgID, []OrgMember{{UserID: uid, Role: "admin", JoinedAt: time.Now()}})
 }
 
-func sharesIndexPath() string { return filepath.Join(uploadsDir, "shares.json") }
-
 func loadSharesIndex() map[string]shareEntry {
-	data, err := os.ReadFile(sharesIndexPath())
-	if err != nil { return map[string]shareEntry{} }
-	var idx map[string]shareEntry
-	json.Unmarshal(data, &idx)
-	if idx == nil { return map[string]shareEntry{} }
+	rows, err := pool.Query(context.Background(), `SELECT token, user_id, wiki_slug FROM shares`)
+	if err != nil {
+		return map[string]shareEntry{}
+	}
+	defer rows.Close()
+	idx := map[string]shareEntry{}
+	for rows.Next() {
+		var token string
+		var e shareEntry
+		if err := rows.Scan(&token, &e.UID, &e.Slug); err == nil {
+			idx[token] = e
+		}
+	}
 	return idx
 }
 
 func saveSharesIndex(idx map[string]shareEntry) {
-	data, _ := json.MarshalIndent(idx, "", "  ")
-	os.WriteFile(sharesIndexPath(), data, 0644)
+	ctx := context.Background()
+	pool.Exec(ctx, `DELETE FROM shares`)
+	for token, e := range idx {
+		pool.Exec(ctx,
+			`INSERT INTO shares (token, user_id, wiki_slug) VALUES ($1, $2, $3) ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, wiki_slug = EXCLUDED.wiki_slug`,
+			token, e.UID, e.Slug,
+		)
+	}
 }
 
+// ── Wiki DB context ───────────────────────────────────────────────────────────
+
 type wikiCtx struct {
-	dir string
+	uid      string
+	repoSlug string
 }
 
 func newWikiCtx(uid, repoSlug string) wikiCtx {
-	d := filepath.Join(userDir(uid), "wikis", repoSlug)
-	os.MkdirAll(d, 0755)
-	return wikiCtx{dir: d}
+	return wikiCtx{uid: uid, repoSlug: repoSlug}
 }
 
-func (wc wikiCtx) metaPath() string { return filepath.Join(wc.dir, "meta.json") }
-func (wc wikiCtx) pagePath(id string) string { return filepath.Join(wc.dir, "page_"+id+".md") }
-
 func (wc wikiCtx) loadMeta() *WikiMeta {
-	data, err := os.ReadFile(wc.metaPath())
-	if err != nil { return nil }
 	var m WikiMeta
-	json.Unmarshal(data, &m)
+	var pagesJSON []byte
+	var stack []string
+	var regenPages []string
+	var shareToken *string
+	err := pool.QueryRow(context.Background(),
+		`SELECT id, repo, repo_slug, branch, commit_sha, generated_at, stack, description, pages,
+		        share_token, has_custom_config, template_id, source, regenerated_pages
+		 FROM wikis WHERE user_id = $1 AND repo_slug = $2`,
+		wc.uid, wc.repoSlug,
+	).Scan(&m.ID, &m.Repo, &m.RepoSlug, &m.Branch, &m.CommitSHA, &m.GeneratedAt,
+		&stack, &m.Description, &pagesJSON,
+		&shareToken, &m.HasCustomConfig, &m.TemplateID, &m.Source, &regenPages)
+	if err != nil {
+		return nil
+	}
+	m.Stack = stack
+	m.RegeneratedPages = regenPages
+	if shareToken != nil {
+		m.ShareToken = *shareToken
+	}
+	json.Unmarshal(pagesJSON, &m.Pages)
 	return &m
 }
 
 func (wc wikiCtx) saveMeta(m WikiMeta) error {
-	data, _ := json.MarshalIndent(m, "", "  ")
-	return os.WriteFile(wc.metaPath(), data, 0644)
+	pagesJSON, _ := json.Marshal(m.Pages)
+	var shareToken *string
+	if m.ShareToken != "" {
+		shareToken = &m.ShareToken
+	}
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO wikis (id, user_id, repo, repo_slug, branch, commit_sha, generated_at, stack,
+		                    description, pages, share_token, has_custom_config, template_id, source, regenerated_pages)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		 ON CONFLICT (user_id, repo_slug) DO UPDATE SET
+		   id = EXCLUDED.id,
+		   repo = EXCLUDED.repo,
+		   branch = EXCLUDED.branch,
+		   commit_sha = EXCLUDED.commit_sha,
+		   generated_at = EXCLUDED.generated_at,
+		   stack = EXCLUDED.stack,
+		   description = EXCLUDED.description,
+		   pages = EXCLUDED.pages,
+		   share_token = EXCLUDED.share_token,
+		   has_custom_config = EXCLUDED.has_custom_config,
+		   template_id = EXCLUDED.template_id,
+		   source = EXCLUDED.source,
+		   regenerated_pages = EXCLUDED.regenerated_pages`,
+		m.ID, wc.uid, m.Repo, m.RepoSlug, m.Branch, m.CommitSHA, m.GeneratedAt, m.Stack,
+		m.Description, pagesJSON, shareToken, m.HasCustomConfig, m.TemplateID, m.Source, m.RegeneratedPages,
+	)
+	return err
 }
 
-func (wc wikiCtx) savePageContent(id, content string) error {
-	return os.WriteFile(wc.pagePath(id), []byte(content), 0644)
+func (wc wikiCtx) savePageContent(pageID, content string) error {
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO wiki_pages (wiki_id, page_id, content)
+		 SELECT id, $2, $3 FROM wikis WHERE user_id = $1 AND repo_slug = $4
+		 ON CONFLICT (wiki_id, page_id) DO UPDATE SET content = EXCLUDED.content`,
+		wc.uid, pageID, content, wc.repoSlug,
+	)
+	return err
 }
 
-func (wc wikiCtx) loadPageContent(id string) (string, error) {
-	data, err := os.ReadFile(wc.pagePath(id))
-	return string(data), err
+func (wc wikiCtx) loadPageContent(pageID string) (string, error) {
+	var content string
+	err := pool.QueryRow(context.Background(),
+		`SELECT wp.content FROM wiki_pages wp
+		 JOIN wikis w ON wp.wiki_id = w.id
+		 WHERE w.user_id = $1 AND w.repo_slug = $2 AND wp.page_id = $3`,
+		wc.uid, wc.repoSlug, pageID,
+	).Scan(&content)
+	return content, err
 }
 
 func repoToSlug(repo string) string {
@@ -454,15 +640,33 @@ func repoToSlug(repo string) string {
 }
 
 func listUserWikis(uid string) []WikiMeta {
-	wikisDir := filepath.Join(userDir(uid), "wikis")
-	entries, err := os.ReadDir(wikisDir)
-	if err != nil { return nil }
+	rows, err := pool.Query(context.Background(),
+		`SELECT id, repo, repo_slug, branch, commit_sha, generated_at, stack, description, pages,
+		        share_token, has_custom_config, template_id, source, regenerated_pages
+		 FROM wikis WHERE user_id = $1 ORDER BY generated_at DESC`, uid)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
 	var result []WikiMeta
-	for _, e := range entries {
-		if !e.IsDir() { continue }
-		wc := wikiCtx{dir: filepath.Join(wikisDir, e.Name())}
-		m := wc.loadMeta()
-		if m != nil { result = append(result, *m) }
+	for rows.Next() {
+		var m WikiMeta
+		var pagesJSON []byte
+		var stack []string
+		var regenPages []string
+		var shareToken *string
+		if err := rows.Scan(&m.ID, &m.Repo, &m.RepoSlug, &m.Branch, &m.CommitSHA, &m.GeneratedAt,
+			&stack, &m.Description, &pagesJSON,
+			&shareToken, &m.HasCustomConfig, &m.TemplateID, &m.Source, &regenPages); err != nil {
+			continue
+		}
+		m.Stack = stack
+		m.RegeneratedPages = regenPages
+		if shareToken != nil {
+			m.ShareToken = *shareToken
+		}
+		json.Unmarshal(pagesJSON, &m.Pages)
+		result = append(result, m)
 	}
 	return result
 }
@@ -691,25 +895,38 @@ type Folder struct {
 	Name string `json:"name"`
 }
 
-type folderCtx struct{ path string }
+type folderCtx struct{ uid string }
 
 func newFolderCtx(uid string) folderCtx {
-	return folderCtx{path: filepath.Join(userDir(uid), "folders.json")}
+	return folderCtx{uid: uid}
 }
 
 func (fc folderCtx) load() []Folder {
-	data, err := os.ReadFile(fc.path)
+	rows, err := pool.Query(context.Background(),
+		`SELECT id, name FROM folders WHERE user_id = $1 ORDER BY name`, fc.uid)
 	if err != nil {
 		return nil
 	}
+	defer rows.Close()
 	var folders []Folder
-	json.Unmarshal(data, &folders)
+	for rows.Next() {
+		var f Folder
+		if err := rows.Scan(&f.ID, &f.Name); err == nil {
+			folders = append(folders, f)
+		}
+	}
 	return folders
 }
 
 func (fc folderCtx) save(folders []Folder) {
-	data, _ := json.MarshalIndent(folders, "", "  ")
-	os.WriteFile(fc.path, data, 0644)
+	ctx := context.Background()
+	pool.Exec(ctx, `DELETE FROM folders WHERE user_id = $1`, fc.uid)
+	for _, f := range folders {
+		pool.Exec(ctx,
+			`INSERT INTO folders (id, user_id, name) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`,
+			f.ID, fc.uid, f.Name,
+		)
+	}
 }
 
 // ── Per-user file context ─────────────────────────────────────────────────────
@@ -719,29 +936,43 @@ func userDir(uid string) string {
 }
 
 type fileCtx struct {
-	dir  string
-	meta string
+	uid string
+	dir string
 }
 
 func newFileCtx(uid string) fileCtx {
 	d := userDir(uid)
 	os.MkdirAll(d, 0755)
-	return fileCtx{dir: d, meta: filepath.Join(d, "files.json")}
+	return fileCtx{uid: uid, dir: d}
 }
 
 func (fc fileCtx) loadMeta() []FileMeta {
-	data, err := os.ReadFile(fc.meta)
+	rows, err := pool.Query(context.Background(),
+		`SELECT id, name, size, ext, folder_id, uploaded_at FROM files WHERE user_id = $1 ORDER BY uploaded_at DESC`, fc.uid)
 	if err != nil {
 		return nil
 	}
+	defer rows.Close()
 	var files []FileMeta
-	json.Unmarshal(data, &files)
+	for rows.Next() {
+		var f FileMeta
+		if err := rows.Scan(&f.ID, &f.Name, &f.Size, &f.Ext, &f.FolderID, &f.UploadedAt); err == nil {
+			files = append(files, f)
+		}
+	}
 	return files
 }
 
 func (fc fileCtx) saveMeta(files []FileMeta) {
-	data, _ := json.MarshalIndent(files, "", "  ")
-	os.WriteFile(fc.meta, data, 0644)
+	ctx := context.Background()
+	for _, f := range files {
+		pool.Exec(ctx,
+			`INSERT INTO files (id, user_id, name, size, ext, folder_id, uploaded_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)
+			 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, size = EXCLUDED.size, folder_id = EXCLUDED.folder_id`,
+			f.ID, fc.uid, f.Name, f.Size, f.Ext, f.FolderID, f.UploadedAt,
+		)
+	}
 }
 
 func (fc fileCtx) filePath(id, ext string) string {
@@ -1071,8 +1302,7 @@ func deleteFile(c *gin.Context) {
 		return
 	}
 	os.Remove(fc.filePath(id, files[idx].Ext))
-	files = append(files[:idx], files[idx+1:]...)
-	fc.saveMeta(files)
+	pool.Exec(context.Background(), `DELETE FROM files WHERE id = $1 AND user_id = $2`, id, fc.uid)
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
@@ -1182,9 +1412,7 @@ func putSettings(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid openai_model"})
 		return
 	}
-	path := filepath.Join(userDir(me(c).ID), "settings.json")
-	data, _ := json.MarshalIndent(body, "", "  ")
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := saveSettings(me(c).ID, body); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save settings"})
 		return
 	}
@@ -1521,23 +1749,40 @@ type GitHubAccount struct {
 	Token string `json:"token"`
 }
 
-func githubAccountsPath(uid string) string {
-	return filepath.Join(userDir(uid), "github_accounts.json")
-}
-
 func loadGitHubAccounts(uid string) []GitHubAccount {
-	data, err := os.ReadFile(githubAccountsPath(uid))
+	rows, err := pool.Query(context.Background(),
+		`SELECT login, token FROM github_accounts WHERE user_id = $1 ORDER BY login`, uid)
 	if err != nil {
 		return nil
 	}
+	defer rows.Close()
 	var accounts []GitHubAccount
-	json.Unmarshal(data, &accounts)
+	for rows.Next() {
+		var a GitHubAccount
+		if err := rows.Scan(&a.Login, &a.Token); err == nil {
+			accounts = append(accounts, a)
+		}
+	}
 	return accounts
 }
 
 func saveGitHubAccounts(uid string, accounts []GitHubAccount) error {
-	data, _ := json.MarshalIndent(accounts, "", "  ")
-	return os.WriteFile(githubAccountsPath(uid), data, 0600)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `DELETE FROM github_accounts WHERE user_id = $1`, uid)
+	if err != nil {
+		return err
+	}
+	for _, a := range accounts {
+		_, err = pool.Exec(ctx,
+			`INSERT INTO github_accounts (user_id, login, token) VALUES ($1, $2, $3)
+			 ON CONFLICT (user_id, login) DO UPDATE SET token = EXCLUDED.token`,
+			uid, a.Login, a.Token,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func githubTokenForLogin(uid, login string) string {
@@ -1687,7 +1932,7 @@ func githubDisconnect(c *gin.Context) {
 	login := c.Query("login")
 	if login == "" {
 		// Remove all
-		os.Remove(githubAccountsPath(uid))
+		pool.Exec(context.Background(), `DELETE FROM github_accounts WHERE user_id = $1`, uid)
 		c.JSON(http.StatusOK, gin.H{"message": "disconnected"})
 		return
 	}
@@ -1841,23 +2086,40 @@ type GitLabAccount struct {
 	Token    string `json:"token"`
 }
 
-func gitlabAccountsPath(uid string) string {
-	return filepath.Join(userDir(uid), "gitlab_accounts.json")
-}
-
 func loadGitLabAccounts(uid string) []GitLabAccount {
-	data, err := os.ReadFile(gitlabAccountsPath(uid))
+	rows, err := pool.Query(context.Background(),
+		`SELECT username, token FROM gitlab_accounts WHERE user_id = $1 ORDER BY username`, uid)
 	if err != nil {
 		return nil
 	}
+	defer rows.Close()
 	var accounts []GitLabAccount
-	json.Unmarshal(data, &accounts)
+	for rows.Next() {
+		var a GitLabAccount
+		if err := rows.Scan(&a.Username, &a.Token); err == nil {
+			accounts = append(accounts, a)
+		}
+	}
 	return accounts
 }
 
 func saveGitLabAccounts(uid string, accounts []GitLabAccount) error {
-	data, _ := json.MarshalIndent(accounts, "", "  ")
-	return os.WriteFile(gitlabAccountsPath(uid), data, 0600)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `DELETE FROM gitlab_accounts WHERE user_id = $1`, uid)
+	if err != nil {
+		return err
+	}
+	for _, a := range accounts {
+		_, err = pool.Exec(ctx,
+			`INSERT INTO gitlab_accounts (user_id, username, token) VALUES ($1, $2, $3)
+			 ON CONFLICT (user_id, username) DO UPDATE SET token = EXCLUDED.token`,
+			uid, a.Username, a.Token,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func gitlabTokenForUser(uid string) string {
@@ -2026,7 +2288,7 @@ func gitlabDisconnect(c *gin.Context) {
 	uid := me(c).ID
 	username := c.Query("username")
 	if username == "" {
-		os.Remove(gitlabAccountsPath(uid))
+		pool.Exec(context.Background(), `DELETE FROM gitlab_accounts WHERE user_id = $1`, uid)
 		c.JSON(http.StatusOK, gin.H{"message": "disconnected"})
 		return
 	}
@@ -2260,7 +2522,7 @@ func listWikis(c *gin.Context) {
 
 func getWiki(c *gin.Context) {
 	slug := c.Param("slug")
-	wc := wikiCtx{dir: filepath.Join(userDir(me(c).ID), "wikis", slug)}
+	wc := newWikiCtx(me(c).ID, slug)
 	m := wc.loadMeta()
 	if m == nil { c.JSON(http.StatusNotFound, gin.H{"error": "wiki not found"}); return }
 	c.JSON(http.StatusOK, m)
@@ -2269,7 +2531,7 @@ func getWiki(c *gin.Context) {
 func getWikiPage(c *gin.Context) {
 	slug := c.Param("slug")
 	pageID := c.Param("pageid")
-	wc := wikiCtx{dir: filepath.Join(userDir(me(c).ID), "wikis", slug)}
+	wc := newWikiCtx(me(c).ID, slug)
 	content, err := wc.loadPageContent(pageID)
 	if err != nil { c.JSON(http.StatusNotFound, gin.H{"error": "page not found"}); return }
 	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(content))
@@ -2279,7 +2541,7 @@ func updateWikiPage(c *gin.Context) {
 	slug := c.Param("slug")
 	pageID := c.Param("pageid")
 	uid := me(c).ID
-	wc := wikiCtx{dir: filepath.Join(userDir(uid), "wikis", slug)}
+	wc := newWikiCtx(uid, slug)
 	m := wc.loadMeta()
 	if m == nil { c.JSON(http.StatusNotFound, gin.H{"error": "wiki not found"}); return }
 	// Verify page exists in meta
@@ -2300,17 +2562,9 @@ func updateWikiPage(c *gin.Context) {
 func deleteWiki(c *gin.Context) {
 	slug := c.Param("slug")
 	uid := me(c).ID
-	// Remove share token from index before deleting
-	wc := wikiCtx{dir: filepath.Join(userDir(uid), "wikis", slug)}
-	if m := wc.loadMeta(); m != nil && m.ShareToken != "" {
-		idx := loadSharesIndex()
-		delete(idx, m.ShareToken)
-		saveSharesIndex(idx)
-	}
-	dir := filepath.Join(userDir(uid), "wikis", slug)
-	if err := os.RemoveAll(dir); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete wiki"})
-		return
+	wc := newWikiCtx(uid, slug)
+	if m := wc.loadMeta(); m != nil {
+		pool.Exec(context.Background(), `DELETE FROM wikis WHERE id = $1`, m.ID)
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
@@ -2320,7 +2574,7 @@ func wikiShareGet(c *gin.Context) {
 	idx := loadSharesIndex()
 	entry, ok := idx[token]
 	if !ok { c.JSON(http.StatusNotFound, gin.H{"error": "wiki not found"}); return }
-	wc := wikiCtx{dir: filepath.Join(userDir(entry.UID), "wikis", entry.Slug)}
+	wc := newWikiCtx(entry.UID, entry.Slug)
 	m := wc.loadMeta()
 	if m == nil { c.JSON(http.StatusNotFound, gin.H{"error": "wiki not found"}); return }
 	c.JSON(http.StatusOK, m)
@@ -2332,7 +2586,7 @@ func wikiSharePage(c *gin.Context) {
 	idx := loadSharesIndex()
 	entry, ok := idx[token]
 	if !ok { c.JSON(http.StatusNotFound, gin.H{"error": "wiki not found"}); return }
-	wc := wikiCtx{dir: filepath.Join(userDir(entry.UID), "wikis", entry.Slug)}
+	wc := newWikiCtx(entry.UID, entry.Slug)
 	content, err := wc.loadPageContent(pageID)
 	if err != nil { c.JSON(http.StatusNotFound, gin.H{"error": "page not found"}); return }
 	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(content))
@@ -2353,14 +2607,15 @@ func createWikiTemplate(c *gin.Context) {
 		return
 	}
 	uid := me(c).ID
-	ts := loadTemplates(uid)
 	now := time.Now()
 	tpl := WikiTemplate{
 		ID: uuid.New().String(), Name: strings.TrimSpace(body.Name),
 		Pages: body.Pages, CreatedAt: now, UpdatedAt: now,
 	}
-	ts = append(ts, tpl)
-	saveTemplates(uid, ts)
+	if err := saveTemplate(uid, tpl); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save template"})
+		return
+	}
 	c.JSON(http.StatusCreated, tpl)
 }
 
@@ -2375,33 +2630,37 @@ func updateWikiTemplate(c *gin.Context) {
 		return
 	}
 	uid := me(c).ID
-	ts := loadTemplates(uid)
-	for i, t := range ts {
-		if t.ID == id {
-			if strings.TrimSpace(body.Name) != "" { ts[i].Name = strings.TrimSpace(body.Name) }
-			if body.Pages != nil { ts[i].Pages = body.Pages }
-			ts[i].UpdatedAt = time.Now()
-			saveTemplates(uid, ts)
-			c.JSON(http.StatusOK, ts[i])
-			return
-		}
+	tpl := findTemplate(uid, id)
+	if tpl == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+		return
 	}
-	c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+	if strings.TrimSpace(body.Name) != "" {
+		tpl.Name = strings.TrimSpace(body.Name)
+	}
+	if body.Pages != nil {
+		tpl.Pages = body.Pages
+	}
+	tpl.UpdatedAt = time.Now()
+	if err := saveTemplate(uid, *tpl); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update template"})
+		return
+	}
+	c.JSON(http.StatusOK, tpl)
 }
 
 func deleteWikiTemplate(c *gin.Context) {
 	id := c.Param("tid")
 	uid := me(c).ID
-	ts := loadTemplates(uid)
-	for i, t := range ts {
-		if t.ID == id {
-			ts = append(ts[:i], ts[i+1:]...)
-			saveTemplates(uid, ts)
-			c.JSON(http.StatusOK, gin.H{"message": "deleted"})
-			return
-		}
+	if findTemplate(uid, id) == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+		return
 	}
-	c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+	if err := deleteTemplate(uid, id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete template"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
 func wikiChat(c *gin.Context) {
@@ -2429,7 +2688,7 @@ func wikiChat(c *gin.Context) {
 		return
 	}
 
-	wc := wikiCtx{dir: filepath.Join(userDir(uid), "wikis", slug)}
+	wc := newWikiCtx(uid, slug)
 	meta := wc.loadMeta()
 	if meta == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "wiki not found"})
@@ -2927,15 +3186,7 @@ func superAdminPromoteUser(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
-	ids := loadSuperAdminIDs()
-	for _, id := range ids {
-		if id == targetUID {
-			c.JSON(http.StatusOK, gin.H{"message": "already a super admin"})
-			return
-		}
-	}
-	ids = append(ids, targetUID)
-	saveSuperAdminIDs(ids)
+	addSuperAdmin(targetUID)
 	c.JSON(http.StatusOK, gin.H{"message": "promoted"})
 }
 
@@ -2955,19 +3206,14 @@ func superAdminDemoteUser(c *gin.Context) {
 			return
 		}
 	}
-	ids := loadSuperAdminIDs()
-	var next []string
-	for _, id := range ids {
-		if id != targetUID { next = append(next, id) }
-	}
-	saveSuperAdminIDs(next)
+	removeSuperAdmin(targetUID)
 	c.JSON(http.StatusOK, gin.H{"message": "demoted"})
 }
 
 func superAdminDeleteOrg(c *gin.Context) {
 	if !isSuperAdmin(me(c)) { c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"}); return }
 	orgID := c.Param("orgid")
-	if err := os.RemoveAll(orgDir(orgID)); err != nil {
+	if _, err := pool.Exec(context.Background(), `DELETE FROM organizations WHERE id = $1`, orgID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete org"})
 		return
 	}

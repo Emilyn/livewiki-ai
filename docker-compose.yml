@@ -1,0 +1,34 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mdfviewer
+      POSTGRES_USER: mdfviewer
+      POSTGRES_PASSWORD: mdfviewer
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mdfviewer -d mdfviewer"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://mdfviewer:mdfviewer@db:5432/mdfviewer?sslmode=disable
+      UPLOADS_DIR: /data/uploads
+      STATIC_DIR: /app/static
+      GIN_MODE: debug
+    volumes:
+      - appdata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  appdata:
