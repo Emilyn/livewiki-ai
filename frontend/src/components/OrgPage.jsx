@@ -309,8 +309,28 @@ function OrgDetail({ org, currentUserId, onToast }) {
   useEffect(() => { load() }, [load])
 
   if (loading) return (
-    <div className="flex items-center gap-2 text-sm text-muted-foreground p-6">
-      <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-primary" /> Loading…
+    <div className="space-y-4 animate-pulse">
+      <div className="flex items-center gap-3">
+        <div className="h-9 w-9 rounded-lg bg-muted shrink-0" />
+        <div className="space-y-1.5">
+          <div className="h-3.5 w-32 rounded bg-muted" />
+          <div className="h-3 w-24 rounded bg-muted" />
+        </div>
+      </div>
+      <div className="flex gap-4 border-b border-border pb-2">
+        <div className="h-3 w-20 rounded bg-muted" />
+        <div className="h-3 w-10 rounded bg-muted" />
+      </div>
+      {[1, 2, 3].map(i => (
+        <div key={i} className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-2">
+          <div className="h-7 w-7 rounded-full bg-muted shrink-0" />
+          <div className="flex-1 space-y-1.5">
+            <div className="h-3 w-28 rounded bg-muted" />
+            <div className="h-2.5 w-36 rounded bg-muted" />
+          </div>
+          <div className="h-5 w-12 rounded-full bg-muted" />
+        </div>
+      ))}
     </div>
   )
   if (!orgDetail) return null

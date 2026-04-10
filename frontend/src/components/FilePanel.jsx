@@ -145,6 +145,8 @@ export default function FilePanel({ selectedFile, onSelect, onToast }) {
     try {
       const updated = await assignFileFolder(fileId, folderId)
       setFiles(f => f.map(x => x.id === fileId ? { ...x, folder_id: updated.folder_id } : x))
+      const folder = folders.find(f => f.id === folderId)
+      onToast(folderId ? `Moved to "${folder?.name}"` : 'Removed from folder')
     } catch {
       onToast('Failed to move file', 'error')
     }
@@ -337,15 +339,17 @@ export default function FilePanel({ selectedFile, onSelect, onToast }) {
                           </svg>
                         </Button>
                       </div>
-                      {!isCollapsed && (
-                        <div className="pl-4 flex flex-col gap-0.5">
-                          {folderFiles.length === 0 ? (
-                            <p className="text-xs text-muted-foreground px-3 py-2">Empty folder</p>
-                          ) : (
-                            folderFiles.map(renderFile)
-                          )}
+                      <div className={cn('grid transition-all duration-200', isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]')}>
+                        <div className="overflow-hidden">
+                          <div className="pl-4 flex flex-col gap-0.5 pt-0.5">
+                            {folderFiles.length === 0 ? (
+                              <p className="text-xs text-muted-foreground px-3 py-2">Empty folder</p>
+                            ) : (
+                              folderFiles.map(renderFile)
+                            )}
+                          </div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   )
                 })}

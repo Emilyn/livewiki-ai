@@ -209,7 +209,35 @@ export default function MarkdownViewer({ file, onToast }) {
   const [saving, setSaving]   = useState(false)
   const [loading, setLoading] = useState(false)
   const [aiPopover, setAiPopover] = useState(null)
-  const textareaRef = useRef()
+  const [splitPos, setSplitPos] = useState(50) // left pane % in split mode
+  const textareaRef  = useRef()
+  const containerRef = useRef()
+  const isDragging   = useRef(false)
+
+  const handleDividerMouseDown = useCallback((e) => {
+    e.preventDefault()
+    isDragging.current = true
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    const onMouseMove = (e) => {
+      if (!isDragging.current || !containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      const pos = ((e.clientX - rect.left) / rect.width) * 100
+      setSplitPos(Math.min(80, Math.max(20, pos)))
+    }
+
+    const onMouseUp = () => {
+      isDragging.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [])
 
   useEffect(() => {
     if (!file) return
@@ -381,7 +409,7 @@ export default function MarkdownViewer({ file, onToast }) {
       )}
 
       {/* Body */}
-      <div className={cn('grid flex-1 min-h-0', mode === 'split' ? 'grid-cols-2' : 'grid-cols-1')}>
+      <div ref={containerRef} className="flex flex-1 min-h-0">
         {/* Editor pane */}
         {inEdit && (
           <textarea
@@ -391,18 +419,39 @@ export default function MarkdownViewer({ file, onToast }) {
             onKeyDown={handleKeyDown}
             onMouseUp={handleTextareaMouseUp}
             spellCheck={false}
-            className={cn(
-              'flex-1 resize-none bg-background text-foreground border-none outline-none p-5',
-              'font-mono text-sm leading-relaxed min-h-[500px] tab-[2]',
-              mode === 'split' && 'border-r border-border'
-            )}
-            style={{ fontFamily: "'Fira Code', 'Cascadia Code', monospace", tabSize: 2 }}
+            className="resize-none bg-background text-foreground border-none outline-none p-5 font-mono text-sm leading-relaxed min-h-[500px]"
+            style={{
+              fontFamily: "'Fira Code', 'Cascadia Code', monospace",
+              tabSize: 2,
+              width: mode === 'split' ? `${splitPos}%` : '100%',
+            }}
           />
+        )}
+
+        {/* Drag divider */}
+        {mode === 'split' && (
+          <div
+            onMouseDown={handleDividerMouseDown}
+            className="relative shrink-0 w-px bg-border hover:bg-sky-400/60 transition-colors cursor-col-resize group"
+          >
+            {/* wider invisible hit area */}
+            <div className="absolute inset-y-0 -left-2 -right-2 cursor-col-resize" />
+            {/* handle dots */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+              {[0,1,2].map(i => <div key={i} className="w-1 h-1 rounded-full bg-sky-400" />)}
+            </div>
+          </div>
         )}
 
         {/* Preview pane */}
         {(mode === 'view' || mode === 'split') && (
-          <div className="p-5 overflow-y-auto" style={{ minHeight: mode === 'split' ? 500 : undefined }}>
+          <div
+            className="overflow-y-auto p-5"
+            style={{
+              width: mode === 'split' ? `${100 - splitPos}%` : '100%',
+              minHeight: 500,
+            }}
+          >
             <Preview content={draft ?? content} />
           </div>
         )}
