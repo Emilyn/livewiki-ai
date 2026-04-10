@@ -58,6 +58,8 @@ func init() {
 		log.Fatalf("failed to init auth store: %v", err)
 	}
 
+	migrateWikisFromDisk()
+
 	activeRedirectURI = os.Getenv("GOOGLE_REDIRECT_URI")
 	if activeRedirectURI == "" {
 		if domain := os.Getenv("RAILWAY_PUBLIC_DOMAIN"); domain != "" {
@@ -544,6 +546,98 @@ func saveSharesIndex(idx map[string]shareEntry) {
 			`INSERT INTO shares (token, user_id, wiki_slug) VALUES ($1, $2, $3) ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, wiki_slug = EXCLUDED.wiki_slug`,
 			token, e.UID, e.Slug,
 		)
+	}
+}
+
+// migrateWikisFromDisk reads any wiki data written by the old filesystem-based
+// storage and inserts it into the database. Safe to call on every startup:
+// ON CONFLICT DO NOTHING means it will never overwrite data already in the DB.
+func migrateWikisFromDisk() {
+	usersDir := filepath.Join(uploadsDir, "users")
+	userEntries, err := os.ReadDir(usersDir)
+	if err != nil {
+		return
+	}
+	migrated := 0
+	for _, userEntry := range userEntries {
+		if !userEntry.IsDir() {
+			continue
+		}
+		uid := userEntry.Name()
+		wikisDir := filepath.Join(usersDir, uid, "wikis")
+		wikiEntries, err := os.ReadDir(wikisDir)
+		if err != nil {
+			continue
+		}
+		for _, wikiEntry := range wikiEntries {
+			if !wikiEntry.IsDir() {
+				continue
+			}
+			slug := wikiEntry.Name()
+			metaData, err := os.ReadFile(filepath.Join(wikisDir, slug, "meta.json"))
+			if err != nil {
+				continue
+			}
+			var m WikiMeta
+			if err := json.Unmarshal(metaData, &m); err != nil {
+				continue
+			}
+			if m.ID == "" {
+				m.ID = slug
+			}
+			if m.RepoSlug == "" {
+				m.RepoSlug = slug
+			}
+			if m.Source == "" {
+				m.Source = "github"
+			}
+			pagesJSON, _ := json.Marshal(m.Pages)
+			var shareToken *string
+			if m.ShareToken != "" {
+				shareToken = &m.ShareToken
+			}
+			regenPages := m.RegeneratedPages
+			if regenPages == nil {
+				regenPages = []string{}
+			}
+			_, err = pool.Exec(context.Background(),
+				`INSERT INTO wikis (id, user_id, repo, repo_slug, branch, commit_sha, generated_at, stack,
+				                    description, pages, share_token, has_custom_config, template_id, source, regenerated_pages)
+				 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+				 ON CONFLICT (user_id, repo_slug) DO NOTHING`,
+				m.ID, uid, m.Repo, m.RepoSlug, m.Branch, m.CommitSHA, m.GeneratedAt, m.Stack,
+				m.Description, pagesJSON, shareToken, m.HasCustomConfig, m.TemplateID, m.Source, regenPages,
+			)
+			if err != nil {
+				log.Printf("wiki disk migration: insert wiki %s: %v", slug, err)
+				continue
+			}
+			// Migrate share token
+			if m.ShareToken != "" {
+				pool.Exec(context.Background(),
+					`INSERT INTO shares (token, user_id, wiki_slug) VALUES ($1,$2,$3)
+					 ON CONFLICT (token) DO NOTHING`,
+					m.ShareToken, uid, slug,
+				)
+			}
+			// Migrate page content
+			for _, page := range m.Pages {
+				content, err := os.ReadFile(filepath.Join(wikisDir, slug, "page_"+page.ID+".md"))
+				if err != nil {
+					continue
+				}
+				pool.Exec(context.Background(),
+					`INSERT INTO wiki_pages (wiki_id, page_id, content)
+					 SELECT id, $2, $3 FROM wikis WHERE user_id = $1 AND repo_slug = $4
+					 ON CONFLICT (wiki_id, page_id) DO NOTHING`,
+					uid, page.ID, string(content), slug,
+				)
+			}
+			migrated++
+		}
+	}
+	if migrated > 0 {
+		log.Printf("wiki disk migration: migrated %d wiki(s) from disk to database", migrated)
 	}
 }
 
@@ -3633,14 +3727,41 @@ Base this on the actual code flows you can see.`, body.Repo),
 		}
 	}
 
-	// Generate each page (skipping pages that haven't changed)
+	// Build page list (all specs, content generated below)
 	var generatedPages []WikiPageMeta
+	for _, spec := range pages {
+		generatedPages = append(generatedPages, WikiPageMeta{ID: spec.id, Title: spec.title, Slug: spec.slug, Order: spec.order})
+	}
+
+	// Persist the wiki row first so savePageContent can reference it by wiki_id
+	wikiID := uuid.New().String()
+	if existingMeta != nil { wikiID = existingMeta.ID }
+	shareToken := strings.ReplaceAll(uuid.New().String(), "-", "")[:20]
+	if existingMeta != nil && existingMeta.ShareToken != "" { shareToken = existingMeta.ShareToken }
+	meta := WikiMeta{
+		ID:              wikiID,
+		Repo:            body.Repo,
+		RepoSlug:        repoSlug,
+		Branch:          body.Branch,
+		CommitSHA:       commitSHA,
+		GeneratedAt:     time.Now(),
+		Pages:           generatedPages,
+		Stack:           stack,
+		Description:     fmt.Sprintf("%s — %s", repoShort, stackStr),
+		ShareToken:      shareToken,
+		HasCustomConfig: hasCustomConfig,
+		TemplateID:      body.TemplateID,
+		Source:          body.Source,
+	}
+	if err := wc.saveMeta(meta); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save wiki"})
+		return
+	}
+
+	// Generate each page (skipping pages that haven't changed)
 	var regenPageIDs []string
 	for _, spec := range pages {
-		pageMeta := WikiPageMeta{ID: spec.id, Title: spec.title, Slug: spec.slug, Order: spec.order}
 		if !pagesToRegen[spec.id] {
-			// Page unchanged — keep existing content on disk, just record the meta
-			generatedPages = append(generatedPages, pageMeta)
 			continue
 		}
 		userMsg := fmt.Sprintf("Repository context for `%s`:\n%s\n\n---\n\n%s", body.Repo, repoCtxStr, spec.prompt)
@@ -3653,30 +3774,9 @@ Base this on the actual code flows you can see.`, body.Repo),
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save page"})
 			return
 		}
-		generatedPages = append(generatedPages, pageMeta)
 		regenPageIDs = append(regenPageIDs, spec.title)
 	}
-
-	wikiID := uuid.New().String()
-	if existingMeta != nil { wikiID = existingMeta.ID }
-	shareToken := strings.ReplaceAll(uuid.New().String(), "-", "")[:20]
-	if existingMeta != nil && existingMeta.ShareToken != "" { shareToken = existingMeta.ShareToken }
-	meta := WikiMeta{
-		ID:               wikiID,
-		Repo:             body.Repo,
-		RepoSlug:         repoSlug,
-		Branch:           body.Branch,
-		CommitSHA:        commitSHA,
-		GeneratedAt:      time.Now(),
-		Pages:            generatedPages,
-		Stack:            stack,
-		Description:      fmt.Sprintf("%s — %s", repoShort, stackStr),
-		RegeneratedPages: regenPageIDs,
-		ShareToken:       shareToken,
-		HasCustomConfig:  hasCustomConfig,
-		TemplateID:       body.TemplateID,
-		Source:           body.Source,
-	}
+	meta.RegeneratedPages = regenPageIDs
 	if err := wc.saveMeta(meta); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save wiki"})
 		return
