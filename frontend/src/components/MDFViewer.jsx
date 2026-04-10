@@ -144,7 +144,7 @@ export default function MDFViewer({ file, onSelect, onToast }) {
 
   const addChannel = async (ch) => {
     const key = `${ch.group}:${ch.name}`
-    if (charts.find(c => c.key === key)) { setActiveChart(key); return }
+    if (charts.find(c => c.key === key)) { setActiveChart(key); onToast(`${ch.name} already in chart`); return }
     const color = CHART_COLORS[charts.length % CHART_COLORS.length]
     setCharts(c => [...c, { key, name: ch.name, group: ch.group, color, data: null, loading: true }])
     setActiveChart(key)
@@ -184,10 +184,42 @@ export default function MDFViewer({ file, onSelect, onToast }) {
     if (file.ext === '.json') return <JsonViewer file={file} onToast={onToast} />
 
     if (loading) return (
-      <div className="flex items-center justify-center gap-2 rounded-xl border border-border bg-card p-12">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-border border-t-primary" />
-        <span className="text-sm text-muted-foreground">Parsing MDF file…</span>
-      </div>
+      <>
+        <div className="flex gap-2 flex-wrap mb-1">
+          {[80, 64, 56, 120].map((w, i) => (
+            <div key={i} className="h-9 rounded-lg border border-border bg-card px-3 py-1.5 flex items-center">
+              <div className="h-2.5 rounded bg-muted animate-pulse" style={{ width: w }} />
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-[260px_1fr] gap-4 items-start">
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div className="h-3 w-16 rounded bg-muted animate-pulse" />
+              <div className="h-4 w-6 rounded-full bg-muted animate-pulse" />
+            </div>
+            <div className="p-3 flex flex-col gap-2">
+              <div className="h-7 rounded-md bg-muted animate-pulse" />
+              <div className="flex flex-col gap-0.5">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="h-7 rounded-md bg-muted/60 animate-pulse" style={{ animationDelay: `${i * 40}ms` }} />
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="flex items-center px-4 py-3 border-b border-border">
+              <div className="h-3 w-24 rounded bg-muted animate-pulse" />
+            </div>
+            <div className="p-4 flex items-center justify-center min-h-[200px]">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-primary" />
+                Parsing MDF file…
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
     )
 
     if (!info) return null
