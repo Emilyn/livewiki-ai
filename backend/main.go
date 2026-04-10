@@ -2436,8 +2436,8 @@ func gitlabGetContent(c *gin.Context) {
 	c.Data(http.StatusOK, "text/plain; charset=utf-8", data)
 }
 
-// fetchChangedFilesGitLab calls GitLab compare API and returns changed file paths.
-func fetchChangedFilesGitLab(ctx interface{ Done() <-chan struct{} }, token, repo, baseSHA, headSHA string) []string {
+// compareGitLab calls GitLab compare API and returns changed files and commit messages.
+func compareGitLab(ctx interface{ Done() <-chan struct{} }, token, repo, baseSHA, headSHA string) *repoCompare {
 	encodedRepo := url.PathEscape(repo)
 	compareURL := fmt.Sprintf("https://gitlab.com/api/v4/projects/%s/repository/compare?from=%s&to=%s", encodedRepo, baseSHA, headSHA)
 	resp, err := doGitLabRequest(ctx, token, "GET", compareURL, nil)
@@ -2452,6 +2452,9 @@ func fetchChangedFilesGitLab(ctx interface{ Done() <-chan struct{} }, token, rep
 		Diffs []struct {
 			NewPath string `json:"new_path"`
 		} `json:"diffs"`
+		Commits []struct {
+			Message string `json:"message"`
+		} `json:"commits"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil
@@ -2459,11 +2462,30 @@ func fetchChangedFilesGitLab(ctx interface{ Done() <-chan struct{} }, token, rep
 	if len(result.Diffs) >= 1000 {
 		return nil
 	}
-	out := make([]string, len(result.Diffs))
-	for i, d := range result.Diffs {
-		out[i] = d.NewPath
+	out := &repoCompare{}
+	for _, d := range result.Diffs {
+		out.Files = append(out.Files, d.NewPath)
+	}
+	for _, c := range result.Commits {
+		msg := c.Message
+		if idx := strings.Index(msg, "\n"); idx >= 0 {
+			msg = msg[:idx]
+		}
+		msg = strings.TrimSpace(msg)
+		if msg != "" {
+			out.Commits = append(out.Commits, msg)
+		}
 	}
 	return out
+}
+
+// fetchChangedFilesGitLab is kept for backward compatibility.
+func fetchChangedFilesGitLab(ctx interface{ Done() <-chan struct{} }, token, repo, baseSHA, headSHA string) []string {
+	r := compareGitLab(ctx, token, repo, baseSHA, headSHA)
+	if r == nil {
+		return nil
+	}
+	return r.Files
 }
 
 // callAIWithHistory calls the configured AI provider with a full message history.
@@ -2729,9 +2751,15 @@ Reference file names, functions, and modules by name when relevant. Use markdown
 	c.JSON(http.StatusOK, gin.H{"answer": answer})
 }
 
-// fetchChangedFiles calls GitHub compare API and returns the list of changed file paths.
-// Returns nil if comparison is not possible (no base SHA, API error, >300 files).
-func fetchChangedFiles(ctx interface{ Done() <-chan struct{} }, token, repo, baseSHA, headSHA string) []string {
+// repoCompare holds the result of a compare between two commits.
+type repoCompare struct {
+	Files   []string // changed file paths
+	Commits []string // first line of each commit message
+}
+
+// compareGitHub calls GitHub compare API and returns changed files and commit messages.
+// Returns nil if comparison is not possible (API error, >300 files).
+func compareGitHub(ctx interface{ Done() <-chan struct{} }, token, repo, baseSHA, headSHA string) *repoCompare {
 	compareURL := fmt.Sprintf("https://api.github.com/repos/%s/compare/%s...%s", repo, baseSHA, headSHA)
 	req, err := http.NewRequestWithContext(ctx.(interface {
 		Done() <-chan struct{}
@@ -2754,20 +2782,42 @@ func fetchChangedFiles(ctx interface{ Done() <-chan struct{} }, token, repo, bas
 		Files []struct {
 			Filename string `json:"filename"`
 		} `json:"files"`
-		TotalCommits int `json:"total_commits"`
+		Commits []struct {
+			Commit struct {
+				Message string `json:"message"`
+			} `json:"commit"`
+		} `json:"commits"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil
 	}
-	// GitHub caps compare at 300 files; if we hit the cap, fall back to full regen
 	if len(result.Files) >= 300 {
 		return nil
 	}
-	out := make([]string, len(result.Files))
-	for i, f := range result.Files {
-		out[i] = f.Filename
+	out := &repoCompare{}
+	for _, f := range result.Files {
+		out.Files = append(out.Files, f.Filename)
+	}
+	for _, c := range result.Commits {
+		msg := c.Commit.Message
+		if idx := strings.Index(msg, "\n"); idx >= 0 {
+			msg = msg[:idx]
+		}
+		msg = strings.TrimSpace(msg)
+		if msg != "" {
+			out.Commits = append(out.Commits, msg)
+		}
 	}
 	return out
+}
+
+// fetchChangedFiles is kept for backward compatibility.
+func fetchChangedFiles(ctx interface{ Done() <-chan struct{} }, token, repo, baseSHA, headSHA string) []string {
+	r := compareGitHub(ctx, token, repo, baseSHA, headSHA)
+	if r == nil {
+		return nil
+	}
+	return r.Files
 }
 
 // pagesForChangedFiles maps a list of changed file paths to the set of wiki page IDs
@@ -3331,15 +3381,15 @@ func wikiGenerate(c *gin.Context) {
 		"overview": true, "architecture": true, "structure": true,
 		"modules": true, "dataflow": true,
 	}
+	var diffResult *repoCompare
 	if existingMeta != nil && existingMeta.CommitSHA != "" && commitSHA != "" {
-		var changed []string
 		if body.Source == "gitlab" {
-			changed = fetchChangedFilesGitLab(c.Request.Context(), token, body.Repo, existingMeta.CommitSHA, commitSHA)
+			diffResult = compareGitLab(c.Request.Context(), token, body.Repo, existingMeta.CommitSHA, commitSHA)
 		} else {
-			changed = fetchChangedFiles(c.Request.Context(), token, body.Repo, existingMeta.CommitSHA, commitSHA)
+			diffResult = compareGitHub(c.Request.Context(), token, body.Repo, existingMeta.CommitSHA, commitSHA)
 		}
-		if changed != nil {
-			pagesToRegen = pagesForChangedFiles(changed)
+		if diffResult != nil {
+			pagesToRegen = pagesForChangedFiles(diffResult.Files)
 		}
 	}
 
@@ -3432,11 +3482,67 @@ func wikiGenerate(c *gin.Context) {
 		for _, s := range pages { pagesToRegen[s.id] = true }
 	}
 
+	// Add changelog page when this is an incremental update (not first generation)
+	if diffResult != nil && (len(diffResult.Files) > 0 || len(diffResult.Commits) > 0) {
+		shortBase := existingMeta.CommitSHA
+		if len(shortBase) > 7 { shortBase = shortBase[:7] }
+		shortHead := commitSHA
+		if len(shortHead) > 7 { shortHead = shortHead[:7] }
+
+		fileList := "none"
+		if len(diffResult.Files) > 0 {
+			fileList = "- " + strings.Join(diffResult.Files, "\n- ")
+		}
+		commitList := "none"
+		if len(diffResult.Commits) > 0 {
+			commitList = "- " + strings.Join(diffResult.Commits, "\n- ")
+		}
+
+		changelogPrompt := fmt.Sprintf(`Generate a Changelog entry for "%s" summarising what changed between commits %s and %s (date: %s).
+
+Commit messages:
+%s
+
+Changed files:
+%s
+
+Write the entry in markdown with this structure:
+## %s — %s → %s
+A 1-2 sentence headline summarising the overall change.
+
+### What changed
+Group changes by area (e.g. API, UI, Database, Config, Tests). For each group, write 2-4 concise bullet points explaining what was added, changed, or fixed. Reference specific file names where relevant.
+
+### Breaking changes
+List any breaking changes, or write "None" if there are none.
+
+Be factual and concise. Do not repeat the raw commit messages verbatim.`,
+			body.Repo, shortBase, shortHead, time.Now().Format("2006-01-02"),
+			commitList, fileList,
+			time.Now().Format("2006-01-02"), shortBase, shortHead,
+		)
+
+		changelogSpec := pageSpec{
+			id: "changelog", title: "Changelog", slug: "changelog", order: 99,
+			prompt: changelogPrompt,
+		}
+		pages = append(pages, changelogSpec)
+		pagesToRegen["changelog"] = true
+	}
+
 	// Detect tech stack (needed for system prompt and default page prompts)
 	stack := detectStack(filteredFiles, fetchFile)
 
 	// Build repo context (cap at ~60k chars total)
 	var repoContext strings.Builder
+	// Build base URL for linking to source files
+	var blobBase string
+	if body.Source == "gitlab" {
+		blobBase = fmt.Sprintf("https://gitlab.com/%s/-/blob/%s", body.Repo, body.Branch)
+	} else {
+		blobBase = fmt.Sprintf("https://github.com/%s/blob/%s", body.Repo, body.Branch)
+	}
+
 	charBudget := 60000
 	for _, f := range filteredFiles {
 		if charBudget <= 0 { break }
@@ -3444,7 +3550,8 @@ func wikiGenerate(c *gin.Context) {
 		if err != nil { continue }
 		if len(content) > charBudget { content = content[:charBudget] }
 		ext := strings.TrimPrefix(filepath.Ext(f.Path), ".")
-		repoContext.WriteString(fmt.Sprintf("\n\n### %s\n\n```%s\n%s\n```", f.Path, ext, content))
+		fileURL := blobBase + "/" + f.Path
+		repoContext.WriteString(fmt.Sprintf("\n\n### [%s](%s)\n\n```%s\n%s\n```", f.Path, fileURL, ext, content))
 		charBudget -= len(content)
 	}
 
@@ -3452,7 +3559,9 @@ func wikiGenerate(c *gin.Context) {
 	stackStr := strings.Join(stack, ", ")
 	systemPrompt := fmt.Sprintf(`You are a technical documentation expert. You are analyzing the repository "%s" which uses: %s.
 Generate clear, well-structured markdown documentation. Use headers, code blocks, tables, and Mermaid diagrams where appropriate.
-Always use fenced code blocks with language identifiers. Be specific and accurate based on the actual code provided.`, body.Repo, stackStr)
+Always use fenced code blocks with language identifiers. Be specific and accurate based on the actual code provided.
+When referencing specific files or directories, link to them using markdown links. The source files are hosted at: %s/
+Example: instead of writing ` + "`main.go`" + `, write [` + "`main.go`" + `](%s/main.go). Apply this to all file references throughout the documentation.`, body.Repo, stackStr, blobBase, blobBase)
 
 	repoShort := body.Repo
 	if idx := strings.Index(repoShort, "/"); idx >= 0 { repoShort = repoShort[idx+1:] }
