@@ -1,38 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import mermaid from 'mermaid'
-import DOMPurify from 'dompurify'
+import MermaidBlock from './MermaidBlock'
 import { getFileContent, saveFileContent, getDriveFileContent, saveDriveFileContent, aiInlineEdit } from '../api'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-mermaid.initialize({ startOnLoad: false, theme: 'dark', darkMode: true })
-
-function MermaidBlock({ code }) {
-  const [svg, setSvg] = useState('')
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    const id = 'mermaid-' + Math.random().toString(36).slice(2)
-    mermaid.render(id, code)
-      .then(({ svg }) => setSvg(DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, ADD_TAGS: ['style', 'foreignObject', 'div', 'span'], ADD_ATTR: ['xmlns', 'dominant-baseline', 'requiredFeatures'] })))
-      .catch(e => setError(e.message || 'Diagram error'))
-      .finally(() => {
-        document.getElementById(`d${id}`)?.remove()
-        document.getElementById(id)?.remove()
-      })
-  }, [code])
-
-  if (error) return (
-    <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive font-mono">
-      Mermaid error: {error}
-    </div>
-  )
-  return (
-    <div className="overflow-x-auto my-4 text-center" dangerouslySetInnerHTML={{ __html: svg }} />
-  )
-}
 
 function CodeBlock({ className, children }) {
   const lang = (className || '').replace('language-', '')
