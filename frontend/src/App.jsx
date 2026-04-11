@@ -194,11 +194,6 @@ export default function App() {
             >
               <Icon />
               <span className="flex-1">{label}</span>
-              {id === 'viewer' && selectedFile && (
-                <span className="text-[10px] bg-sky-400/20 text-sky-300 rounded px-1.5 py-0.5 max-w-[80px] truncate">
-                  {selectedFile.name}
-                </span>
-              )}
             </button>
           ))}
         </nav>
