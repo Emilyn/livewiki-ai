@@ -3484,11 +3484,11 @@ func wikiGenerate(c *gin.Context) {
 	wc := newWikiCtx(uid, repoSlug)
 	existingMeta := wc.loadMeta()
 
-	// If nothing changed and all pages are present in the DB, return the cached wiki immediately
+	// If nothing changed (same commit, same template, all pages present) return cached wiki immediately
 	if existingMeta != nil && existingMeta.CommitSHA != "" && existingMeta.CommitSHA == commitSHA &&
+		existingMeta.TemplateID == body.TemplateID &&
 		wc.countPages() >= len(existingMeta.Pages) {
 		existingMeta.RegeneratedPages = []string{}
-		existingMeta.TemplateID = body.TemplateID // persist the newly selected template even when content is unchanged
 		wc.saveMeta(*existingMeta)
 		c.JSON(http.StatusOK, existingMeta)
 		return
