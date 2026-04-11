@@ -621,16 +621,21 @@ func migrateWikisFromDisk() {
 				)
 			}
 			// Migrate page content
+			var wikiID string
+			if scanErr := pool.QueryRow(context.Background(),
+				`SELECT id FROM wikis WHERE user_id = $1 AND repo_slug = $2`, uid, slug,
+			).Scan(&wikiID); scanErr != nil {
+				continue
+			}
 			for _, page := range m.Pages {
 				content, err := os.ReadFile(filepath.Join(wikisDir, slug, "page_"+page.ID+".md"))
 				if err != nil {
 					continue
 				}
 				pool.Exec(context.Background(),
-					`INSERT INTO wiki_pages (wiki_id, page_id, content)
-					 SELECT id, $2, $3 FROM wikis WHERE user_id = $1 AND repo_slug = $4
+					`INSERT INTO wiki_pages (wiki_id, page_id, content) VALUES ($1, $2, $3)
 					 ON CONFLICT (wiki_id, page_id) DO NOTHING`,
-					uid, page.ID, string(content), slug,
+					wikiID, page.ID, string(content),
 				)
 			}
 			migrated++
@@ -709,11 +714,18 @@ func (wc wikiCtx) saveMeta(m WikiMeta) error {
 }
 
 func (wc wikiCtx) savePageContent(pageID, content string) error {
-	_, err := pool.Exec(context.Background(),
-		`INSERT INTO wiki_pages (wiki_id, page_id, content)
-		 SELECT id, $2, $3 FROM wikis WHERE user_id = $1 AND repo_slug = $4
+	var wikiID string
+	err := pool.QueryRow(context.Background(),
+		`SELECT id FROM wikis WHERE user_id = $1 AND repo_slug = $2`,
+		wc.uid, wc.repoSlug,
+	).Scan(&wikiID)
+	if err != nil {
+		return fmt.Errorf("wiki row not found for %s/%s: %w", wc.uid, wc.repoSlug, err)
+	}
+	_, err = pool.Exec(context.Background(),
+		`INSERT INTO wiki_pages (wiki_id, page_id, content) VALUES ($1, $2, $3)
 		 ON CONFLICT (wiki_id, page_id) DO UPDATE SET content = EXCLUDED.content`,
-		wc.uid, pageID, content, wc.repoSlug,
+		wikiID, pageID, content,
 	)
 	return err
 }
@@ -727,6 +739,17 @@ func (wc wikiCtx) loadPageContent(pageID string) (string, error) {
 		wc.uid, wc.repoSlug, pageID,
 	).Scan(&content)
 	return content, err
+}
+
+func (wc wikiCtx) countPages() int {
+	var count int
+	pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM wiki_pages wp
+		 JOIN wikis w ON wp.wiki_id = w.id
+		 WHERE w.user_id = $1 AND w.repo_slug = $2`,
+		wc.uid, wc.repoSlug,
+	).Scan(&count)
+	return count
 }
 
 func repoToSlug(repo string) string {
@@ -3461,8 +3484,9 @@ func wikiGenerate(c *gin.Context) {
 	wc := newWikiCtx(uid, repoSlug)
 	existingMeta := wc.loadMeta()
 
-	// If nothing changed, return the cached wiki immediately
-	if existingMeta != nil && existingMeta.CommitSHA != "" && existingMeta.CommitSHA == commitSHA {
+	// If nothing changed and all pages are present in the DB, return the cached wiki immediately
+	if existingMeta != nil && existingMeta.CommitSHA != "" && existingMeta.CommitSHA == commitSHA &&
+		wc.countPages() >= len(existingMeta.Pages) {
 		existingMeta.RegeneratedPages = []string{}
 		existingMeta.TemplateID = body.TemplateID // persist the newly selected template even when content is unchanged
 		wc.saveMeta(*existingMeta)
@@ -3738,20 +3762,22 @@ Base this on the actual code flows you can see.`, body.Repo),
 	if existingMeta != nil { wikiID = existingMeta.ID }
 	shareToken := strings.ReplaceAll(uuid.New().String(), "-", "")[:20]
 	if existingMeta != nil && existingMeta.ShareToken != "" { shareToken = existingMeta.ShareToken }
+	if stack == nil { stack = []string{} }
 	meta := WikiMeta{
-		ID:              wikiID,
-		Repo:            body.Repo,
-		RepoSlug:        repoSlug,
-		Branch:          body.Branch,
-		CommitSHA:       commitSHA,
-		GeneratedAt:     time.Now(),
-		Pages:           generatedPages,
-		Stack:           stack,
-		Description:     fmt.Sprintf("%s — %s", repoShort, stackStr),
-		ShareToken:      shareToken,
-		HasCustomConfig: hasCustomConfig,
-		TemplateID:      body.TemplateID,
-		Source:          body.Source,
+		ID:               wikiID,
+		Repo:             body.Repo,
+		RepoSlug:         repoSlug,
+		Branch:           body.Branch,
+		CommitSHA:        commitSHA,
+		GeneratedAt:      time.Now(),
+		Pages:            generatedPages,
+		Stack:            stack,
+		Description:      fmt.Sprintf("%s — %s", repoShort, stackStr),
+		ShareToken:       shareToken,
+		HasCustomConfig:  hasCustomConfig,
+		TemplateID:       body.TemplateID,
+		Source:           body.Source,
+		RegeneratedPages: []string{},
 	}
 	if err := wc.saveMeta(meta); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save wiki"})
